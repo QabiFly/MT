@@ -1,0 +1,7 @@
+{
+  "name": "Tuition & Student Management System",
+  "description": "Production-grade PWA tuition and student management system with role-based access, attendance, fees, real-time notices, doubts, and Cloudinary media.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
