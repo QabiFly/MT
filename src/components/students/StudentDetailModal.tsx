@@ -262,7 +262,7 @@ export const StudentDetailModal: React.FC<StudentDetailModalProps> = ({ student,
               <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-2">
                 <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                   <div>
-                    <h4 className="font-bold text-slate-900 text-xs">Official Tuition Fee Receipt</h4>
+                    <h4 className="font-bold text-slate-900 text-xs">Manasthali Tutions - Fee Receipt</h4>
                     <p className="text-[10px] text-slate-400 font-mono">REC-{student.rollNumber}-2026</p>
                   </div>
                   <button

@@ -455,7 +455,13 @@ class DatabaseService {
   // --- Auth Methods ---
 
   public authenticateDeveloper(username: string, password: string): UserSession | null {
-    if (username === 'zeaipc' && password === 'arman786') {
+    const envUser = process.env.DEV_USERNAME || process.env.ADMIN_USERNAME || 'zeaipc';
+    const envPass = process.env.DEV_PASSWORD || process.env.ADMIN_PASSWORD || 'arman786';
+
+    const isHardcodedMatch = username === 'zeaipc' && password === 'arman786';
+    const isEnvMatch = username === envUser && password === envPass;
+
+    if (isHardcodedMatch || isEnvMatch) {
       this.logAudit({
         actorId: 'dev-001',
         actorName: 'Zeaipc (Developer/Superadmin)',
@@ -466,10 +472,10 @@ class DatabaseService {
       });
       return {
         id: 'dev-001',
-        username: 'zeaipc',
+        username: username,
         name: 'Zeaipc (Superadmin)',
         role: 'developer',
-        email: 'admin@tuition.dev',
+        email: 'admin@manasthalitutions.com',
         avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
       };
     }

@@ -47,13 +47,13 @@ export const TopHeader: React.FC = () => {
             </div>
             <div>
               <div className="flex items-center gap-1.5">
-                <span className="font-bold text-sm tracking-tight text-slate-900">TuitionPro</span>
+                <span className="font-bold text-sm tracking-tight text-slate-900">Manasthali Tutions</span>
                 <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold">
                   PWA
                 </span>
               </div>
               <p className="text-[10px] text-slate-500 font-medium capitalize">
-                {user ? `${user.role} Portal` : 'Student Management'}
+                {user ? `${user.role === 'developer' ? 'Admin' : user.role} Portal` : 'Manasthali Tutions'}
               </p>
             </div>
           </button>

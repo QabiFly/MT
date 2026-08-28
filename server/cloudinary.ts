@@ -10,12 +10,29 @@ export interface CloudinarySignatureResponse {
 }
 
 export function getCloudinaryConfig() {
-  const cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_CLOUD_NAME || 'demo';
-  const apiKey = process.env.NEXT_PUBLIC_CLOUDINARY_API_KEY || process.env.CLOUDINARY_API_KEY || '';
-  const apiSecret = process.env.CLOUDINARY_API_SECRET || '';
+  let cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_CLOUD_NAME || '';
+  let apiKey = process.env.NEXT_PUBLIC_CLOUDINARY_API_KEY || process.env.CLOUDINARY_API_KEY || '';
+  let apiSecret = process.env.CLOUDINARY_API_SECRET || '';
   const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || process.env.CLOUDINARY_UPLOAD_PRESET || '';
 
-  const isConfigured = Boolean(cloudName && apiKey && apiSecret);
+  // Parse CLOUDINARY_URL if provided (e.g., cloudinary://123456789:abcdefgh@mycloud)
+  const cloudinaryUrl = process.env.CLOUDINARY_URL;
+  if (cloudinaryUrl && cloudinaryUrl.startsWith('cloudinary://')) {
+    try {
+      const parsed = new URL(cloudinaryUrl);
+      cloudName = parsed.hostname || cloudName;
+      apiKey = parsed.username || apiKey;
+      apiSecret = parsed.password || apiSecret;
+    } catch (e) {
+      console.warn('Failed to parse CLOUDINARY_URL:', e);
+    }
+  }
+
+  if (!cloudName) {
+    cloudName = 'demo';
+  }
+
+  const isConfigured = Boolean(cloudName && cloudName !== 'demo' && apiKey && apiSecret);
 
   return {
     cloudName,

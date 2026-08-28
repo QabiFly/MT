@@ -457,7 +457,7 @@ async function start() {
   }
 
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Tuition & Student Management Server running at http://0.0.0.0:${PORT}`);
+    console.log(`Manasthali Tutions Server running at http://0.0.0.0:${PORT}`);
   });
 }
 

@@ -72,7 +72,7 @@ export const NoticesPage: React.FC = () => {
       <div className="flex items-center justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-lg font-bold text-slate-900 tracking-tight">Tuition Notice Board</h2>
+            <h2 className="text-lg font-bold text-slate-900 tracking-tight">Manasthali Tutions Notice Board</h2>
             <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
               <Radio className="w-3 h-3 text-indigo-600 animate-pulse" /> Live Broadcast
             </span>

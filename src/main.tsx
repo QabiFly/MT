@@ -9,7 +9,7 @@ if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
     navigator.serviceWorker
       .register('/sw.js')
       .then((reg) => {
-        console.log('TuitionPro Service Worker registered:', reg.scope);
+        console.log('Manasthali Tutions Service Worker registered:', reg.scope);
       })
       .catch((err) => {
         console.warn('Service Worker registration error:', err);

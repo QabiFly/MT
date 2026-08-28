@@ -1,11 +1,11 @@
 {
-  "name": "Tuition & Student Management System",
-  "short_name": "TuitionPro",
+  "name": "Manasthali Tutions",
+  "short_name": "Manasthali Tutions",
   "description": "Production-ready mobile-first tuition and student management PWA with attendance, fees, realtime notices, and doubt resolution.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#090d16",
-  "theme_color": "#1e293b",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
   "orientation": "portrait-primary",
   "icons": [
     {

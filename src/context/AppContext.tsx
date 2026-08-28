@@ -197,7 +197,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDeferredPrompt(null);
       addToast({
         title: 'App Installed',
-        message: 'TuitionPro has been added to your device homescreen.',
+        message: 'Manasthali Tutions has been added to your device homescreen.',
         type: 'success',
       });
     }
