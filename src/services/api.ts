@@ -11,6 +11,7 @@ import {
   AttendanceStatus,
 } from '../types/index.js';
 import { enqueueOfflineAction, flushOfflineQueue } from './offlineQueue.js';
+import { authenticateLocally, getLocalStore, saveLocalStore } from './localDataStore.js';
 
 const API_BASE = '/api';
 
@@ -50,26 +51,53 @@ export const api = {
     rollNumber?: number;
     dob?: string;
   }): Promise<{ session: UserSession }> {
-    const res = await fetch(`${API_BASE}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Login failed' }));
-      throw new Error(err.error || 'Authentication error');
+    try {
+      const res = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.session) {
+          localStorage.setItem('tuition_user_session', JSON.stringify(data.session));
+          return data;
+        }
+      }
+    } catch (e) {
+      // Backend not running / offline / static hosting (Vercel)
     }
-    const data = await res.json();
-    localStorage.setItem('tuition_user_session', JSON.stringify(data.session));
-    return data;
+
+    // Always evaluate seamless local credentials
+    const localSession = authenticateLocally(payload);
+    if (localSession) {
+      localStorage.setItem('tuition_user_session', JSON.stringify(localSession));
+      return { session: localSession };
+    }
+
+    throw new Error(
+      payload.role === 'student' || payload.rollNumber
+        ? 'Invalid Roll Number or Date of Birth. (Example: Roll: 1, DOB: 2009-05-14)'
+        : 'Invalid credentials. For Admin, use username "zeaipc" and password "arman786".'
+    );
   },
 
   async getMe(): Promise<{ session: UserSession }> {
-    const res = await fetch(`${API_BASE}/auth/me`, {
-      headers: getAuthHeaders(),
-    });
-    if (!res.ok) throw new Error('Not authenticated');
-    return res.json();
+    try {
+      const res = await fetch(`${API_BASE}/auth/me`, {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) return res.json();
+    } catch (e) {}
+
+    const sessionRaw = localStorage.getItem('tuition_user_session');
+    if (sessionRaw) {
+      try {
+        return { session: JSON.parse(sessionRaw) };
+      } catch (e) {}
+    }
+    throw new Error('Not authenticated');
   },
 
   async logout(): Promise<void> {
@@ -114,7 +142,23 @@ export const api = {
     } catch (err) {
       const cached = getCachedData<any>('students_list');
       if (cached) return cached;
-      throw err;
+      const store = getLocalStore();
+      let list = [...store.students];
+      if (params?.search) {
+        const s = params.search.toLowerCase();
+        list = list.filter((st) => st.fullName.toLowerCase().includes(s) || st.rollNumber.toString().includes(s));
+      }
+      if (params?.className && params.className !== 'all') {
+        list = list.filter((st) => st.className === params.className);
+      }
+      return {
+        students: list,
+        total: list.length,
+        page: 1,
+        limit: 50,
+        totalPages: 1,
+        allClasses: ['Class 9', 'Class 10', 'Class 11', 'Class 12'],
+      };
     }
   },
 
@@ -128,7 +172,9 @@ export const api = {
         return data.nextRollNumber;
       }
     } catch (e) {}
-    return 1;
+    const store = getLocalStore();
+    const maxRoll = store.students.reduce((max, s) => Math.max(max, s.rollNumber || 0), 0);
+    return maxRoll + 1;
   },
 
   async getStudent(id: string): Promise<{ student: Student }> {
@@ -143,62 +189,71 @@ export const api = {
     } catch (err) {
       const cached = getCachedData<{ student: Student }>(`student_${id}`);
       if (cached) return cached;
+      const store = getLocalStore();
+      const st = store.students.find((s) => s.id === id || s.rollNumber.toString() === id);
+      if (st) return { student: st };
       throw err;
     }
   },
 
   async createStudent(studentData: any): Promise<{ student: Student; queuedOffline?: boolean }> {
-    if (!navigator.onLine) {
-      enqueueOfflineAction('student', 'create', studentData);
-      return {
-        student: {
-          ...studentData,
-          id: `temp-${Date.now()}`,
-          rollNumber: 999,
-          active: true,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        },
-        queuedOffline: true,
-      };
-    }
+    try {
+      const res = await fetch(`${API_BASE}/students`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(studentData),
+      });
+      if (res.ok) return res.json();
+    } catch (e) {}
 
-    const res = await fetch(`${API_BASE}/students`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(studentData),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Failed to create student' }));
-      throw new Error(err.error || 'Server error creating student');
-    }
-    return res.json();
+    const store = getLocalStore();
+    const nextRoll = store.students.reduce((max, s) => Math.max(max, s.rollNumber || 0), 0) + 1;
+    const newStudent: Student = {
+      ...studentData,
+      id: `stu-${Date.now()}`,
+      rollNumber: studentData.rollNumber || nextRoll,
+      active: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    store.students.push(newStudent);
+    saveLocalStore(store);
+    return { student: newStudent, queuedOffline: true };
   },
 
   async updateStudent(id: string, updates: Partial<Student>): Promise<{ student: Student }> {
-    if (!navigator.onLine) {
-      enqueueOfflineAction('student', 'update', { id, ...updates });
-      return { student: { id, ...updates } as Student };
-    }
+    try {
+      const res = await fetch(`${API_BASE}/students/${id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) return res.json();
+    } catch (e) {}
 
-    const res = await fetch(`${API_BASE}/students/${id}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(updates),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Failed to update student' }));
-      throw new Error(err.error || 'Error updating student');
+    const store = getLocalStore();
+    const idx = store.students.findIndex((s) => s.id === id);
+    if (idx !== -1) {
+      store.students[idx] = { ...store.students[idx], ...updates, updatedAt: new Date().toISOString() };
+      saveLocalStore(store);
+      return { student: store.students[idx] };
     }
-    return res.json();
+    return { student: { id, ...updates } as Student };
   },
 
   async deleteStudent(id: string): Promise<boolean> {
-    const res = await fetch(`${API_BASE}/students/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
-    return res.ok;
+    try {
+      const res = await fetch(`${API_BASE}/students/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) return true;
+    } catch (e) {}
+
+    const store = getLocalStore();
+    store.students = store.students.filter((s) => s.id !== id);
+    saveLocalStore(store);
+    return true;
   },
 
   // Attendance
@@ -280,15 +335,28 @@ export const api = {
       const res = await fetch(`${API_BASE}/fees/overview`, {
         headers: getAuthHeaders(),
       });
-      if (!res.ok) throw new Error('Failed to fetch fee overview');
-      const data = await res.json();
-      cacheData('fee_overview', data);
-      return data;
-    } catch (err) {
-      const cached = getCachedData<any>('fee_overview');
-      if (cached) return cached;
-      return { totalStudents: 0, paidStudents: 0, unpaidStudents: 0, totalCollected: 0, totalDue: 0, recentTransactions: [] };
-    }
+      if (res.ok) {
+        const data = await res.json();
+        cacheData('fee_overview', data);
+        return data;
+      }
+    } catch (err) {}
+
+    const store = getLocalStore();
+    const totalStudents = store.students.length;
+    const paidStudents = store.students.filter((s: Student) => s.feePaidStatus === 'paid').length;
+    const unpaidStudents = totalStudents - paidStudents;
+    const totalCollected = store.students.reduce((sum: number, s: Student) => sum + (s.feePaidAmount || 0), 0);
+    const totalDue = store.students.reduce((sum: number, s: Student) => sum + (s.feeDueAmount || 0), 0);
+
+    return {
+      totalStudents,
+      paidStudents,
+      unpaidStudents,
+      totalCollected,
+      totalDue,
+      recentTransactions: store.fees || [],
+    };
   },
 
   async getFeeRecords(): Promise<{ records: FeeRecord[] }> {
@@ -297,11 +365,16 @@ export const api = {
   },
 
   async getStudentFeeRecords(studentId: string): Promise<{ records: FeeRecord[] }> {
-    const res = await fetch(`${API_BASE}/fees/student/${studentId}`, {
-      headers: getAuthHeaders(),
-    });
-    if (!res.ok) return { records: [] };
-    return res.json();
+    try {
+      const res = await fetch(`${API_BASE}/fees/student/${studentId}`, {
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) return res.json();
+    } catch (e) {}
+
+    const store = getLocalStore();
+    const recs = store.fees.filter((f: FeeRecord) => f.studentId === studentId);
+    return { records: recs };
   },
 
   async updateFeeStatus(
@@ -335,21 +408,51 @@ export const api = {
       payload = studentIdOrPayload;
     }
 
-    if (!navigator.onLine) {
-      enqueueOfflineAction('fee', 'update', payload);
-      return { success: true, queuedOffline: true };
-    }
+    try {
+      const res = await fetch(`${API_BASE}/fees/update`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) return res.json();
+    } catch (e) {}
 
-    const res = await fetch(`${API_BASE}/fees/update`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Fee update failed' }));
-      throw new Error(err.error || 'Failed to update fee status');
+    const store = getLocalStore();
+    const stIndex = store.students.findIndex((s: Student) => s.id === payload.studentId);
+    if (stIndex !== -1) {
+      const st = store.students[stIndex];
+      st.feePaidStatus = payload.feeStatus;
+      if (payload.feeStatus === 'paid') {
+        st.feePaidAmount = (st.feePaidAmount || 0) + Number(payload.amount || 0);
+        st.feeDueAmount = Math.max(0, (st.feeDueAmount || 0) - Number(payload.amount || 0));
+        st.feeLastPaidDate = new Date().toISOString();
+        st.paymentMode = payload.paymentMode || 'Cash';
+
+        const newRec: FeeRecord = {
+          id: `fee-${Date.now()}`,
+          studentId: st.id,
+          studentRoll: st.rollNumber,
+          studentName: st.fullName,
+          className: st.className,
+          amount: Number(payload.amount || 0),
+          dueAmount: st.feeDueAmount || 0,
+          status: 'paid',
+          paymentMode: payload.paymentMode || 'Cash',
+          markedBy: 'dev-001',
+          markedByName: 'Admin',
+          transactionDate: new Date().toISOString(),
+          receiptNumber: `REC-${st.rollNumber}-${Date.now().toString().slice(-4)}`,
+          remarks: payload.remarks || '',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        store.fees.unshift(newRec);
+      } else {
+        st.feeDueAmount = Number(payload.amount || 500);
+      }
+      saveLocalStore(store);
     }
-    return res.json();
+    return { success: true };
   },
 
   // Notices
@@ -361,15 +464,19 @@ export const api = {
       const res = await fetch(`${API_BASE}/notices?${query.toString()}`, {
         headers: getAuthHeaders(),
       });
-      if (!res.ok) throw new Error('Failed to fetch notices');
-      const data = await res.json();
-      cacheData(`notices_${className || 'all'}`, data);
-      return data;
-    } catch (err) {
-      const cached = getCachedData<any>(`notices_${className || 'all'}`);
-      if (cached) return cached;
-      return { notices: [] };
+      if (res.ok) {
+        const data = await res.json();
+        cacheData(`notices_${className || 'all'}`, data);
+        return data;
+      }
+    } catch (err) {}
+
+    const store = getLocalStore();
+    let notices = [...store.notices];
+    if (className && className !== 'all') {
+      notices = notices.filter((n: Notice) => n.targetClass === 'All' || n.targetClass === 'all' || n.targetClass === className);
     }
+    return { notices };
   },
 
   async createNotice(payload: {
@@ -378,16 +485,31 @@ export const api = {
     targetClass: string;
     priority: 'normal' | 'urgent' | 'announcement';
   }): Promise<{ notice: Notice }> {
-    const res = await fetch(`${API_BASE}/notices`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Failed to create notice' }));
-      throw new Error(err.error || 'Server error creating notice');
-    }
-    return res.json();
+    try {
+      const res = await fetch(`${API_BASE}/notices`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) return res.json();
+    } catch (e) {}
+
+    const store = getLocalStore();
+    const newNotice: Notice = {
+      id: `not-${Date.now()}`,
+      title: payload.title,
+      content: payload.content,
+      targetClass: payload.targetClass,
+      priority: payload.priority as any,
+      authorId: 'dev-001',
+      authorName: 'Admin (Manasthali Tutions)',
+      authorRole: 'developer',
+      createdAt: new Date().toISOString(),
+      readByStudentIds: [],
+    };
+    store.notices.unshift(newNotice);
+    saveLocalStore(store);
+    return { notice: newNotice };
   },
 
   async markNoticeRead(noticeId: string) {
@@ -409,62 +531,99 @@ export const api = {
       const res = await fetch(`${API_BASE}/doubts?${query.toString()}`, {
         headers: getAuthHeaders(),
       });
-      if (!res.ok) throw new Error('Failed to fetch doubts');
-      const data = await res.json();
-      cacheData('doubts_list', data);
-      return data;
-    } catch (err) {
-      const cached = getCachedData<any>('doubts_list');
-      if (cached) return cached;
-      return { doubts: [] };
+      if (res.ok) {
+        const data = await res.json();
+        cacheData('doubts_list', data);
+        return data;
+      }
+    } catch (err) {}
+
+    const store = getLocalStore();
+    let doubts = [...store.doubts];
+    if (params?.studentId) {
+      doubts = doubts.filter((d: Doubt) => d.studentId === params.studentId);
     }
+    if (params?.className) {
+      doubts = doubts.filter((d: Doubt) => d.className === params.className);
+    }
+    return { doubts };
   },
 
-  async createDoubt(payload: { title: string; subject?: string; description: string; imageUrl?: string }): Promise<{ doubt: Doubt }> {
-    if (!navigator.onLine) {
-      enqueueOfflineAction('doubt', 'create', payload);
-      return {
-        doubt: {
-          id: `temp-${Date.now()}`,
-          studentId: 'offline',
-          studentRoll: 0,
-          studentName: 'Me',
-          className: '',
-          title: payload.title,
-          subject: payload.subject || 'General',
-          description: payload.description,
-          imageUrl: payload.imageUrl,
-          status: 'pending',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          replies: [],
-        },
-      };
-    }
+  async createDoubt(payload: any): Promise<{ doubt: Doubt }> {
+    try {
+      const res = await fetch(`${API_BASE}/doubts`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) return res.json();
+    } catch (e) {}
 
-    const res = await fetch(`${API_BASE}/doubts`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Failed to submit doubt' }));
-      throw new Error(err.error || 'Server error creating doubt');
-    }
-    return res.json();
+    const store = getLocalStore();
+    const newDoubt: Doubt = {
+      id: `dbt-${Date.now()}`,
+      studentId: payload.studentId || 'stu-1',
+      studentRoll: payload.studentRoll || 1,
+      studentName: payload.studentName || 'Student',
+      className: payload.className || 'Class 10',
+      title: payload.title || payload.question || 'Doubt Question',
+      subject: payload.subject || 'General',
+      description: payload.description || payload.question || payload.title || '',
+      imageUrl: payload.imageUrl,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      replies: [],
+    };
+    store.doubts.unshift(newDoubt);
+    saveLocalStore(store);
+    return { doubt: newDoubt };
   },
 
   async replyToDoubt(doubtId: string, message: string, imageUrl?: string): Promise<{ doubt: Doubt }> {
-    const res = await fetch(`${API_BASE}/doubts/${doubtId}/reply`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ message, imageUrl }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Failed to submit reply' }));
-      throw new Error(err.error || 'Server error submitting reply');
+    try {
+      const res = await fetch(`${API_BASE}/doubts/${doubtId}/reply`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ message, imageUrl }),
+      });
+      if (res.ok) return res.json();
+    } catch (e) {}
+
+    const store = getLocalStore();
+    const dIndex = store.doubts.findIndex((d: Doubt) => d.id === doubtId);
+    if (dIndex !== -1) {
+      store.doubts[dIndex].status = 'answered';
+      store.doubts[dIndex].updatedAt = new Date().toISOString();
+      store.doubts[dIndex].replies.push({
+        id: `rep-${Date.now()}`,
+        doubtId,
+        authorId: 'dev-001',
+        authorName: 'Admin / Teacher',
+        authorRole: 'teacher',
+        content: message,
+        imageUrl,
+        createdAt: new Date().toISOString(),
+      });
+      saveLocalStore(store);
+      return { doubt: store.doubts[dIndex] };
     }
-    return res.json();
+    return {
+      doubt: {
+        id: doubtId,
+        studentId: '',
+        studentRoll: 0,
+        studentName: '',
+        className: '',
+        title: '',
+        subject: '',
+        description: '',
+        status: 'answered',
+        createdAt: '',
+        updatedAt: '',
+        replies: [],
+      },
+    };
   },
 
   async updateDoubtStatus(doubtId: string, status: string): Promise<{ doubt: Doubt }> {

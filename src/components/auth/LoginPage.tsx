@@ -234,6 +234,57 @@ export const LoginPage: React.FC = () => {
           )}
         </button>
       </form>
+
+      {/* Quick 1-Click Demo Login Helpers */}
+      <div className="mt-6 pt-5 border-t border-slate-100">
+        <p className="text-[11px] font-medium text-slate-400 text-center uppercase tracking-wider mb-2.5">
+          Or 1-Click Quick Demo Sign-In
+        </p>
+        <div className="grid grid-cols-3 gap-1.5">
+          <button
+            type="button"
+            onClick={async () => {
+              setError(null);
+              try {
+                await login({ role: 'developer', username: 'zeaipc', password: 'arman786' });
+              } catch (err: any) {
+                setError(err.message);
+              }
+            }}
+            className="py-1.5 px-2 bg-amber-50 hover:bg-amber-100/80 text-amber-900 border border-amber-200/70 rounded-lg text-[11px] font-medium transition cursor-pointer text-center"
+          >
+            Admin (zeaipc)
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              setError(null);
+              try {
+                await login({ role: 'teacher', username: 'teacher1', password: 'teach123' });
+              } catch (err: any) {
+                setError(err.message);
+              }
+            }}
+            className="py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100/80 text-indigo-900 border border-indigo-200/70 rounded-lg text-[11px] font-medium transition cursor-pointer text-center"
+          >
+            Teacher
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              setError(null);
+              try {
+                await login({ role: 'student', rollNumber: 1, dob: '2009-05-14' });
+              } catch (err: any) {
+                setError(err.message);
+              }
+            }}
+            className="py-1.5 px-2 bg-emerald-50 hover:bg-emerald-100/80 text-emerald-900 border border-emerald-200/70 rounded-lg text-[11px] font-medium transition cursor-pointer text-center"
+          >
+            Student (Roll 1)
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

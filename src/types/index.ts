@@ -9,6 +9,7 @@ export interface UserSession {
   avatarUrl?: string;
   rollNumber?: number; // for student
   studentId?: string; // for student
+  assignedClasses?: string[];
   token?: string;
 }
 
