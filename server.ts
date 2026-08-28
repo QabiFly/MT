@@ -78,24 +78,37 @@ app.get('/api/health', (req, res) => {
 
 // Auth Routes
 app.post('/api/auth/login', (req, res) => {
-  const { role, username, password, rollNumber, dob } = req.body;
+  const { role, username, password, rollNumber, dob } = req.body || {};
+
+  const cleanUser = typeof username === 'string' ? username.trim() : '';
+  const cleanPass = typeof password === 'string' ? password.trim() : '';
 
   let session: UserSession | null = null;
 
-  if (role === 'developer' || username === 'zeaipc') {
-    session = db.authenticateDeveloper(username || 'zeaipc', password);
+  if (role === 'developer' || cleanUser.toLowerCase() === 'zeaipc' || cleanUser.toLowerCase() === 'admin') {
+    session = db.authenticateDeveloper(cleanUser || 'zeaipc', cleanPass);
   } else if (role === 'teacher') {
-    session = db.authenticateTeacher(username, password);
+    session = db.authenticateTeacher(cleanUser, cleanPass);
   } else if (role === 'student' || rollNumber) {
     session = db.authenticateStudent(Number(rollNumber), dob);
+  }
+
+  // Fallback check across all roles in case tab or role was mismatched
+  if (!session) {
+    if (cleanUser && cleanPass) {
+      session = db.authenticateDeveloper(cleanUser, cleanPass) || db.authenticateTeacher(cleanUser, cleanPass);
+    }
+    if (!session && rollNumber && dob) {
+      session = db.authenticateStudent(Number(rollNumber), dob);
+    }
   }
 
   if (!session) {
     return res.status(401).json({
       error:
         role === 'student'
-          ? 'Invalid Roll Number or Date of Birth (Format: YYYY-MM-DD).'
-          : 'Invalid username or password.',
+          ? 'Invalid Roll Number or Date of Birth (Example: Roll: 1, DOB: 2009-05-14).'
+          : 'Invalid username or password. For Admin/Developer sign in with username "zeaipc" & password "arman786".',
     });
   }
 

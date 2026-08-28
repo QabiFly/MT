@@ -41,19 +41,29 @@ export const LoginPage: React.FC = () => {
     e.preventDefault();
     setError(null);
 
+    const cleanUser = username.trim();
+    const cleanPass = password.trim();
+
     try {
       if (activeTab === 'developer') {
-        await login({ role: 'developer', username, password });
+        if (!cleanUser || !cleanPass) {
+          throw new Error('Please enter both Admin username and password.');
+        }
+        await login({ role: 'developer', username: cleanUser, password: cleanPass });
       } else if (activeTab === 'teacher') {
-        await login({ role: 'teacher', username, password });
+        if (!cleanUser || !cleanPass) {
+          throw new Error('Please enter both Teacher username and password.');
+        }
+        await login({ role: 'teacher', username: cleanUser, password: cleanPass });
       } else {
-        if (!rollNumber || isNaN(Number(rollNumber))) {
-          throw new Error('Please enter a valid numeric Roll Number.');
+        const cleanRoll = rollNumber.trim();
+        if (!cleanRoll || isNaN(Number(cleanRoll))) {
+          throw new Error('Please enter a valid numeric Roll Number (e.g. 1).');
         }
-        if (!dob) {
-          throw new Error('Please enter your Date of Birth.');
+        if (!dob.trim()) {
+          throw new Error('Please enter or select your Date of Birth.');
         }
-        await login({ role: 'student', rollNumber: Number(rollNumber), dob });
+        await login({ role: 'student', rollNumber: Number(cleanRoll), dob: dob.trim() });
       }
     } catch (err: any) {
       setError(err.message || 'Login failed. Please check credentials.');
@@ -135,6 +145,9 @@ export const LoginPage: React.FC = () => {
                 <input
                   type="text"
                   required
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder={activeTab === 'developer' ? 'zeaipc' : 'Enter teacher username'}
@@ -150,6 +163,9 @@ export const LoginPage: React.FC = () => {
                 <input
                   type="password"
                   required
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
@@ -170,6 +186,9 @@ export const LoginPage: React.FC = () => {
                   type="number"
                   min="1"
                   required
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
                   value={rollNumber}
                   onChange={(e) => setRollNumber(e.target.value)}
                   placeholder="e.g. 1"
@@ -194,7 +213,7 @@ export const LoginPage: React.FC = () => {
                 <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
               </div>
               <p className="text-[10px] text-slate-500 mt-1">
-                Students log in securely using Roll Number + Date of Birth.
+                Students log in securely using Roll Number + Date of Birth (YYYY-MM-DD).
               </p>
             </div>
           </>
