@@ -123,14 +123,18 @@ export interface Teacher {
   id: string;
   username: string;
   name: string;
+  password?: string;
   email?: string;
   mobile?: string;
   phone?: string;
+  mobileNumber?: string;
   subject?: string;
   assignedClasses: string[];
   subjects?: string[];
   active?: boolean;
   joinedDate?: string;
+  createdAt?: string;
+  photoUrl?: string;
 }
 
 export interface AuditLog {

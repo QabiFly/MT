@@ -6,22 +6,21 @@ import {
   Users,
   CalendarCheck,
   CreditCard,
-  Bell,
   HelpCircle,
-  ShieldCheck,
-  Settings,
+  Menu,
 } from 'lucide-react';
 
 export const BottomNav: React.FC = () => {
   const { user } = useAuth();
-  const { activeTab, setActiveTab } = useApp();
+  const { activeTab, setActiveTab, setIsSidebarOpen } = useApp();
 
   if (!user) return null;
 
   interface NavItem {
-    tab: NavTab;
+    tab?: NavTab;
     label: string;
     icon: React.ComponentType<{ className?: string }>;
+    isMenuToggle?: boolean;
     badge?: number;
   }
 
@@ -33,10 +32,7 @@ export const BottomNav: React.FC = () => {
       { tab: 'students', label: 'Students', icon: Users },
       { tab: 'attendance', label: 'Attendance', icon: CalendarCheck },
       { tab: 'fees', label: 'Fees', icon: CreditCard },
-      { tab: 'notices', label: 'Notices', icon: Bell },
-      { tab: 'doubts', label: 'Doubts', icon: HelpCircle },
-      { tab: 'audit', label: 'Audit Logs', icon: ShieldCheck },
-      { tab: 'settings', label: 'Config', icon: Settings },
+      { label: 'More', icon: Menu, isMenuToggle: true },
     ];
   } else if (user.role === 'teacher') {
     items = [
@@ -44,32 +40,39 @@ export const BottomNav: React.FC = () => {
       { tab: 'students', label: 'Students', icon: Users },
       { tab: 'attendance', label: 'Attendance', icon: CalendarCheck },
       { tab: 'fees', label: 'Fees', icon: CreditCard },
-      { tab: 'notices', label: 'Notices', icon: Bell },
-      { tab: 'doubts', label: 'Doubts', icon: HelpCircle },
+      { label: 'More', icon: Menu, isMenuToggle: true },
     ];
   } else {
     // Student
     items = [
       { tab: 'dashboard', label: 'My Home', icon: LayoutDashboard },
       { tab: 'attendance', label: 'Attendance', icon: CalendarCheck },
-      { tab: 'fees', label: 'My Fees', icon: CreditCard },
-      { tab: 'notices', label: 'Notices', icon: Bell },
-      { tab: 'doubts', label: 'Ask Doubt', icon: HelpCircle },
+      { tab: 'fees', label: 'Fees', icon: CreditCard },
+      { tab: 'doubts', label: 'Doubts', icon: HelpCircle },
+      { label: 'More', icon: Menu, isMenuToggle: true },
     ];
   }
 
   return (
     <nav className="sticky bottom-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-2 py-1.5 shadow-xs transition-all">
       <div className="flex items-center justify-around max-w-lg mx-auto">
-        {items.map((item) => {
+        {items.map((item, idx) => {
           const Icon = item.icon;
-          const isActive = activeTab === item.tab;
+          const isActive = !item.isMenuToggle && activeTab === item.tab;
+
+          const handleClick = () => {
+            if (item.isMenuToggle) {
+              setIsSidebarOpen(true);
+            } else if (item.tab) {
+              setActiveTab(item.tab);
+            }
+          };
 
           return (
             <button
-              key={item.tab}
-              onClick={() => setActiveTab(item.tab)}
-              className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all duration-200 relative min-w-[50px] ${
+              key={item.tab || `menu-${idx}`}
+              onClick={handleClick}
+              className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-all duration-200 relative min-w-[54px] cursor-pointer ${
                 isActive
                   ? 'text-indigo-600 bg-indigo-50/80 font-semibold'
                   : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'

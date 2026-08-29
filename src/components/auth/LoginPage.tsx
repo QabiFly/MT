@@ -17,7 +17,7 @@ export const LoginPage: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<'developer' | 'teacher' | 'student'>('developer');
   const [username, setUsername] = useState('zeaipc');
-  const [password, setPassword] = useState('arman786');
+  const [password, setPassword] = useState('');
   const [rollNumber, setRollNumber] = useState('');
   const [dob, setDob] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +27,7 @@ export const LoginPage: React.FC = () => {
     setError(null);
     if (tab === 'developer') {
       setUsername('zeaipc');
-      setPassword('arman786');
+      setPassword('');
     } else if (tab === 'teacher') {
       setUsername('');
       setPassword('');
@@ -139,7 +139,7 @@ export const LoginPage: React.FC = () => {
           <>
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-1">
-                {activeTab === 'developer' ? 'Developer / Admin Username' : 'Teacher Username'}
+                {activeTab === 'developer' ? 'Admin Username / Email' : 'Teacher Username / Email'}
               </label>
               <div className="relative">
                 <input
@@ -150,7 +150,7 @@ export const LoginPage: React.FC = () => {
                   spellCheck={false}
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder={activeTab === 'developer' ? 'zeaipc' : 'Enter teacher username'}
+                  placeholder={activeTab === 'developer' ? 'zeaipc' : 'e.g. teacher_username'}
                   className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
                 />
                 <User className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
@@ -163,9 +163,6 @@ export const LoginPage: React.FC = () => {
                 <input
                   type="password"
                   required
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
@@ -183,8 +180,9 @@ export const LoginPage: React.FC = () => {
               </label>
               <div className="relative">
                 <input
-                  type="number"
-                  min="1"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   required
                   autoCapitalize="none"
                   autoCorrect="off"
@@ -213,7 +211,7 @@ export const LoginPage: React.FC = () => {
                 <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
               </div>
               <p className="text-[10px] text-slate-500 mt-1">
-                Students log in securely using Roll Number + Date of Birth (YYYY-MM-DD).
+                Students log in securely using Roll Number + Date of Birth.
               </p>
             </div>
           </>
@@ -228,63 +226,12 @@ export const LoginPage: React.FC = () => {
             <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
           ) : (
             <>
-              <span>Sign In to Dashboard</span>
+              <span>Sign In to Portal</span>
               <ArrowRight className="w-4 h-4" />
             </>
           )}
         </button>
       </form>
-
-      {/* Quick 1-Click Demo Login Helpers */}
-      <div className="mt-6 pt-5 border-t border-slate-100">
-        <p className="text-[11px] font-medium text-slate-400 text-center uppercase tracking-wider mb-2.5">
-          Or 1-Click Quick Demo Sign-In
-        </p>
-        <div className="grid grid-cols-3 gap-1.5">
-          <button
-            type="button"
-            onClick={async () => {
-              setError(null);
-              try {
-                await login({ role: 'developer', username: 'zeaipc', password: 'arman786' });
-              } catch (err: any) {
-                setError(err.message);
-              }
-            }}
-            className="py-1.5 px-2 bg-amber-50 hover:bg-amber-100/80 text-amber-900 border border-amber-200/70 rounded-lg text-[11px] font-medium transition cursor-pointer text-center"
-          >
-            Admin (zeaipc)
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              setError(null);
-              try {
-                await login({ role: 'teacher', username: 'teacher1', password: 'teach123' });
-              } catch (err: any) {
-                setError(err.message);
-              }
-            }}
-            className="py-1.5 px-2 bg-indigo-50 hover:bg-indigo-100/80 text-indigo-900 border border-indigo-200/70 rounded-lg text-[11px] font-medium transition cursor-pointer text-center"
-          >
-            Teacher
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              setError(null);
-              try {
-                await login({ role: 'student', rollNumber: 1, dob: '2009-05-14' });
-              } catch (err: any) {
-                setError(err.message);
-              }
-            }}
-            className="py-1.5 px-2 bg-emerald-50 hover:bg-emerald-100/80 text-emerald-900 border border-emerald-200/70 rounded-lg text-[11px] font-medium transition cursor-pointer text-center"
-          >
-            Student (Roll 1)
-          </button>
-        </div>
-      </div>
     </div>
   );
 };

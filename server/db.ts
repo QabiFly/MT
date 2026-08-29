@@ -69,385 +69,24 @@ class DatabaseService {
   }
 
   public seedInitialData() {
-    const now = new Date().toISOString();
-    const today = new Date().toISOString().split('T')[0];
-
-    // 1. Teachers
-    this.data.teachers = [
-      {
-        id: 'teach-001',
-        username: 'teacher1',
-        name: 'Prof. Rajesh Sharma',
-        email: 'rajesh.sharma@tuition.edu',
-        mobile: '9812345670',
-        assignedClasses: ['Class 9', 'Class 10', 'Class 11', 'Class 12'],
-        subjects: ['Mathematics', 'Physics'],
-        active: true,
-        joinedDate: '2023-04-01',
-      },
-      {
-        id: 'teach-002',
-        username: 'anita.verma',
-        name: 'Dr. Anita Verma',
-        email: 'anita.verma@tuition.edu',
-        mobile: '9812345671',
-        assignedClasses: ['Class 10', 'Class 12'],
-        subjects: ['Chemistry', 'Biology'],
-        active: true,
-        joinedDate: '2023-06-15',
-      },
-    ];
-
-    // 2. Students with Sequential Roll Numbers starting from 1
-    this.data.students = [
-      {
-        id: 'stu-1',
-        rollNumber: 1,
-        fullName: 'Aarav Patel',
-        mobileNumber: '9876543210',
-        email: 'aarav.patel@gmail.com',
-        photoUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?auto=format&fit=crop&w=400&q=80',
-        address: '42 Orchid Heights, MG Road, Pune',
-        className: 'Class 10',
-        dob: '2009-05-14',
-        dateOfJoining: '2024-01-10',
-        feePaidStatus: 'paid',
-        feeDueAmount: 0,
-        feePaidAmount: 500,
-        feeLastPaidDate: '2026-08-01T10:00:00.000Z',
-        paymentMode: 'UPI / Online',
-        notes: 'Exceptional in algebra and geometry.',
-        active: true,
-        createdByTeacherId: 'teach-001',
-        createdByName: 'Prof. Rajesh Sharma',
-        createdAt: '2024-01-10T09:00:00.000Z',
-        updatedAt: now,
-      },
-      {
-        id: 'stu-2',
-        rollNumber: 2,
-        fullName: 'Diya Sharma',
-        mobileNumber: '9876543211',
-        email: 'diya.sharma@outlook.com',
-        photoUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=80',
-        address: '18 Garden Crest, Sector 14, Noida',
-        className: 'Class 10',
-        dob: '2009-08-22',
-        dateOfJoining: '2024-02-01',
-        feePaidStatus: 'unpaid',
-        feeDueAmount: 350,
-        feePaidAmount: 0,
-        notes: 'Needs additional practice in Trigonometry.',
-        active: true,
-        createdByTeacherId: 'teach-001',
-        createdByName: 'Prof. Rajesh Sharma',
-        createdAt: '2024-02-01T10:30:00.000Z',
-        updatedAt: now,
-      },
-      {
-        id: 'stu-3',
-        rollNumber: 3,
-        fullName: 'Rohan Gupta',
-        mobileNumber: '9876543212',
-        email: 'rohan.gupta@gmail.com',
-        photoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
-        address: '88 Lakeview Apartments, Bandra West, Mumbai',
-        className: 'Class 12',
-        dob: '2007-03-10',
-        dateOfJoining: '2023-07-15',
-        feePaidStatus: 'paid',
-        feeDueAmount: 0,
-        feePaidAmount: 750,
-        feeLastPaidDate: '2026-08-05T14:30:00.000Z',
-        paymentMode: 'Net Banking',
-        notes: 'Preparing for engineering entrance exams.',
-        active: true,
-        createdByTeacherId: 'teach-001',
-        createdByName: 'Prof. Rajesh Sharma',
-        createdAt: '2023-07-15T11:00:00.000Z',
-        updatedAt: now,
-      },
-      {
-        id: 'stu-4',
-        rollNumber: 4,
-        fullName: 'Ananya Iyer',
-        mobileNumber: '9876543213',
-        email: 'ananya.iyer@gmail.com',
-        photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80',
-        address: '104 Palm Grove, Indiranagar, Bengaluru',
-        className: 'Class 11',
-        dob: '2008-11-05',
-        dateOfJoining: '2023-09-01',
-        feePaidStatus: 'unpaid',
-        feeDueAmount: 600,
-        feePaidAmount: 0,
-        notes: 'Active in doubt queries and discussion forums.',
-        active: true,
-        createdByTeacherId: 'teach-002',
-        createdByName: 'Dr. Anita Verma',
-        createdAt: '2023-09-01T08:00:00.000Z',
-        updatedAt: now,
-      },
-      {
-        id: 'stu-5',
-        rollNumber: 5,
-        fullName: 'Kabir Mehta',
-        mobileNumber: '9876543214',
-        address: '15 Civil Lines, Jaipur',
-        className: 'Class 9',
-        dob: '2010-01-30',
-        dateOfJoining: '2024-04-10',
-        feePaidStatus: 'paid',
-        feeDueAmount: 0,
-        feePaidAmount: 400,
-        feeLastPaidDate: '2026-08-10T11:20:00.000Z',
-        paymentMode: 'Cash Receipt',
-        notes: 'Consistently completes weekly assignments.',
-        active: true,
-        createdByTeacherId: 'teach-001',
-        createdByName: 'Prof. Rajesh Sharma',
-        createdAt: '2024-04-10T12:00:00.000Z',
-        updatedAt: now,
-      },
-    ];
-
-    // 3. Past Attendance Logs
+    // Start completely clean - No mock students or mock teachers
+    // Developer adds teachers and teachers add students
+    this.data.teachers = [];
+    this.data.students = [];
     this.data.attendance = [];
-    const dateList: string[] = [];
-    for (let i = 10; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      dateList.push(d.toISOString().split('T')[0]);
-    }
-
-    this.data.students.forEach((stu) => {
-      dateList.forEach((dt, idx) => {
-        // High attendance for all sample students
-        const isAbsent = (stu.rollNumber === 2 && idx === 3) || (stu.rollNumber === 4 && idx === 7);
-        const isLate = (stu.rollNumber === 1 && idx === 5);
-        const status: AttendanceStatus = isAbsent ? 'absent' : isLate ? 'late' : 'present';
-
-        this.data.attendance.push({
-          id: `att-${stu.id}-${dt}`,
-          studentId: stu.id,
-          studentRoll: stu.rollNumber,
-          studentName: stu.fullName,
-          className: stu.className,
-          date: dt,
-          status,
-          markedBy: 'teach-001',
-          markedByName: 'Prof. Rajesh Sharma',
-          updatedAt: `${dt}T09:30:00.000Z`,
-        });
-      });
-    });
-
-    // 4. Fee Records
-    this.data.feeRecords = [
-      {
-        id: 'fee-rec-1',
-        studentId: 'stu-1',
-        studentRoll: 1,
-        studentName: 'Aarav Patel',
-        className: 'Class 10',
-        amount: 500,
-        dueAmount: 0,
-        status: 'paid',
-        paymentMode: 'UPI / Online',
-        receiptNumber: 'REC-2026-001',
-        transactionDate: '2026-08-01T10:00:00.000Z',
-        markedBy: 'teach-001',
-        markedByName: 'Prof. Rajesh Sharma',
-        remarks: 'Monthly tuition fee August 2026 paid in full.',
-        createdAt: '2026-08-01T10:00:00.000Z',
-        updatedAt: '2026-08-01T10:00:00.000Z',
-      },
-      {
-        id: 'fee-rec-3',
-        studentId: 'stu-3',
-        studentRoll: 3,
-        studentName: 'Rohan Gupta',
-        className: 'Class 12',
-        amount: 750,
-        dueAmount: 0,
-        status: 'paid',
-        paymentMode: 'Net Banking',
-        receiptNumber: 'REC-2026-003',
-        transactionDate: '2026-08-05T14:30:00.000Z',
-        markedBy: 'teach-001',
-        markedByName: 'Prof. Rajesh Sharma',
-        remarks: 'Semester II Physics & Math coaching fee.',
-        createdAt: '2026-08-05T14:30:00.000Z',
-        updatedAt: '2026-08-05T14:30:00.000Z',
-      },
-      {
-        id: 'fee-rec-5',
-        studentId: 'stu-5',
-        studentRoll: 5,
-        studentName: 'Kabir Mehta',
-        className: 'Class 9',
-        amount: 400,
-        dueAmount: 0,
-        status: 'paid',
-        paymentMode: 'Cash Receipt',
-        receiptNumber: 'REC-2026-005',
-        transactionDate: '2026-08-10T11:20:00.000Z',
-        markedBy: 'teach-001',
-        markedByName: 'Prof. Rajesh Sharma',
-        remarks: 'August tuition fee paid at center.',
-        createdAt: '2026-08-10T11:20:00.000Z',
-        updatedAt: '2026-08-10T11:20:00.000Z',
-      },
-    ];
-
-    // 5. Notices
-    this.data.notices = [
-      {
-        id: 'not-001',
-        title: 'Weekly Mathematics Mock Test on Saturday',
-        content: 'All Class 10 & 12 students are required to attend the 2-hour offline mock exam covering Calculus, Quadratic Equations, and Trigonometry at 10:00 AM sharp.',
-        targetClass: 'All',
-        priority: 'urgent',
-        authorId: 'teach-001',
-        authorName: 'Prof. Rajesh Sharma',
-        authorRole: 'teacher',
-        createdAt: '2026-08-25T14:00:00.000Z',
-        readByStudentIds: ['stu-1', 'stu-3'],
-      },
-      {
-        id: 'not-002',
-        title: 'Class 10 Physics Lab Session Rescheduled',
-        content: 'The optics and refraction experimental session for Class 10 will now be conducted on Thursday afternoon from 4:30 PM to 6:00 PM.',
-        targetClass: 'Class 10',
-        priority: 'announcement',
-        authorId: 'teach-001',
-        authorName: 'Prof. Rajesh Sharma',
-        authorRole: 'teacher',
-        createdAt: '2026-08-26T09:15:00.000Z',
-        readByStudentIds: ['stu-1', 'stu-2'],
-      },
-      {
-        id: 'not-003',
-        title: 'Parent-Teacher Review Meeting',
-        content: 'Monthly progress reviews for all classes will be held this Sunday. Parents can schedule 10-minute slots between 10:00 AM and 1:00 PM.',
-        targetClass: 'All',
-        priority: 'normal',
-        authorId: 'dev-001',
-        authorName: 'Zeaipc (Admin)',
-        authorRole: 'developer',
-        createdAt: '2026-08-27T16:45:00.000Z',
-        readByStudentIds: ['stu-1', 'stu-4', 'stu-5'],
-      },
-    ];
-
-    // 6. Doubts
-    this.data.doubts = [
-      {
-        id: 'dbt-001',
-        studentId: 'stu-1',
-        studentRoll: 1,
-        studentName: 'Aarav Patel',
-        className: 'Class 10',
-        title: 'Quadratic Formula with imaginary roots derivation',
-        description: 'Sir, when the discriminant b^2 - 4ac is less than zero, how do we express roots in standard form for competitive exam problems?',
-        status: 'answered',
-        createdAt: '2026-08-26T11:00:00.000Z',
-        updatedAt: '2026-08-26T13:40:00.000Z',
-        replies: [
-          {
-            id: 'rep-001',
-            doubtId: 'dbt-001',
-            authorId: 'teach-001',
-            authorName: 'Prof. Rajesh Sharma',
-            authorRole: 'teacher',
-            message: 'Great question Aarav! When D < 0, rewrite sqrt(D) as i * sqrt(|D|). The roots are then x = (-b ± i*sqrt(4ac - b^2)) / 2a. Let us solve 3 examples in class tomorrow.',
-            createdAt: '2026-08-26T13:40:00.000Z',
-          },
-        ],
-      },
-      {
-        id: 'dbt-002',
-        studentId: 'stu-2',
-        studentRoll: 2,
-        studentName: 'Diya Sharma',
-        className: 'Class 10',
-        title: 'Trigonometric identities proof confusion in Step 3',
-        description: 'I am getting stuck simplifying (tan θ + sec θ - 1) / (tan θ - sec θ + 1). Please guide how to substitute sec^2 θ - tan^2 θ = 1 in the numerator.',
-        status: 'pending',
-        createdAt: '2026-08-27T15:20:00.000Z',
-        updatedAt: '2026-08-27T15:20:00.000Z',
-        replies: [],
-      },
-      {
-        id: 'dbt-003',
-        studentId: 'stu-4',
-        studentRoll: 4,
-        studentName: 'Ananya Iyer',
-        className: 'Class 11',
-        title: 'Chemical Equilibrium Le Chatelier Principle shift',
-        description: 'When pressure is increased for 2SO2(g) + O2(g) <=> 2SO3(g), does the yield of SO3 increase or remain constant?',
-        imageUrl: 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=600&q=80',
-        status: 'answered',
-        createdAt: '2026-08-27T18:00:00.000Z',
-        updatedAt: '2026-08-27T19:10:00.000Z',
-        replies: [
-          {
-            id: 'rep-002',
-            doubtId: 'dbt-003',
-            authorId: 'teach-002',
-            authorName: 'Dr. Anita Verma',
-            authorRole: 'teacher',
-            message: 'According to Le Chatelier’s principle, increasing pressure shifts equilibrium towards fewer moles of gas. Left has 3 moles, right has 2 moles, so the forward reaction is favored and SO3 yield increases!',
-            createdAt: '2026-08-27T19:10:00.000Z',
-          },
-        ],
-      },
-    ];
-
-    // 7. Audit Logs
+    this.data.feeRecords = [];
+    this.data.notices = [];
+    this.data.doubts = [];
     this.data.auditLogs = [
       {
-        id: 'aud-001',
-        timestamp: '2026-08-01T10:00:00.000Z',
-        actorId: 'teach-001',
-        actorName: 'Prof. Rajesh Sharma',
-        actorRole: 'teacher',
-        action: 'FEE_PAID_CONFIRMED',
-        entityType: 'fee',
-        entityId: 'stu-1',
-        details: 'Marked fee as PAID for student Aarav Patel (Roll #1, Class 10) Amount: $500.00 via UPI. Receipt: REC-2026-001',
-      },
-      {
-        id: 'aud-002',
-        timestamp: '2026-08-25T14:00:00.000Z',
-        actorId: 'teach-001',
-        actorName: 'Prof. Rajesh Sharma',
-        actorRole: 'teacher',
-        action: 'NOTICE_BROADCAST',
-        entityType: 'notice',
-        entityId: 'not-001',
-        details: 'Published Urgent notice: "Weekly Mathematics Mock Test on Saturday" to All Classes.',
-      },
-      {
-        id: 'aud-003',
-        timestamp: '2026-08-26T13:40:00.000Z',
-        actorId: 'teach-001',
-        actorName: 'Prof. Rajesh Sharma',
-        actorRole: 'teacher',
-        action: 'DOUBT_REPLIED',
-        entityType: 'doubt',
-        entityId: 'dbt-001',
-        details: 'Answered doubt "Quadratic Formula with imaginary roots" for student Aarav Patel.',
-      },
-      {
-        id: 'aud-004',
-        timestamp: '2026-08-27T16:45:00.000Z',
+        id: `aud-init-${Date.now()}`,
+        timestamp: new Date().toISOString(),
         actorId: 'dev-001',
         actorName: 'Zeaipc (Admin)',
         actorRole: 'developer',
-        action: 'SYSTEM_SETTINGS_UPDATED',
+        action: 'SYSTEM_INITIALIZED',
         entityType: 'system',
-        details: 'System initial seed verified and Cloudinary signature pipeline initialized.',
+        details: 'Manasthali Tutions database initialized in clean production mode. Ready for faculty and student enrollment.',
       },
     ];
   }
@@ -493,12 +132,19 @@ class DatabaseService {
     const cleanPass = (password || '').trim();
 
     const teacher = this.data.teachers.find(
-      (t) => (t.username.toLowerCase() === cleanUser || t.email.toLowerCase() === cleanUser) && t.active
+      (t) => (t.username.toLowerCase() === cleanUser || (t.email && t.email.toLowerCase() === cleanUser)) && t.active
     );
 
-    // Accept default passwords for teachers or fallback
+    if (!teacher) return null;
+
+    // Check teacher set password or standard system fallback passwords
     const validPasswords = ['teach123', 'arman786', 'password', 'admin123', 'teacher123'];
-    if (teacher && (validPasswords.includes(cleanPass) || cleanPass === 'teacher' || cleanPass === 'teach')) {
+    const isPassCorrect =
+      (teacher.password && teacher.password === cleanPass) ||
+      validPasswords.includes(cleanPass) ||
+      cleanPass === 'teach123';
+
+    if (isPassCorrect) {
       this.logAudit({
         actorId: teacher.id,
         actorName: teacher.name,
@@ -513,6 +159,8 @@ class DatabaseService {
         name: teacher.name,
         role: 'teacher',
         email: teacher.email,
+        assignedClasses: teacher.assignedClasses,
+        avatarUrl: teacher.photoUrl,
       };
     }
     return null;
@@ -1206,6 +854,53 @@ class DatabaseService {
 
     this.save();
     return newTeacher;
+  }
+
+  public updateTeacher(id: string, updates: Partial<Teacher>, actor: UserSession): Teacher {
+    const teacher = this.data.teachers.find((t) => t.id === id);
+    if (!teacher) throw new Error(`Teacher with ID ${id} not found.`);
+
+    if (updates.name) teacher.name = updates.name.trim();
+    if (updates.email) teacher.email = updates.email.trim();
+    if (updates.mobile) teacher.mobile = updates.mobile.trim();
+    if (updates.subject) teacher.subject = updates.subject.trim();
+    if (updates.assignedClasses) teacher.assignedClasses = updates.assignedClasses;
+    if (updates.password) teacher.password = updates.password.trim();
+    if (typeof updates.active === 'boolean') teacher.active = updates.active;
+    if (updates.photoUrl !== undefined) teacher.photoUrl = updates.photoUrl;
+
+    this.logAudit({
+      actorId: actor.id,
+      actorName: actor.name,
+      actorRole: actor.role,
+      action: 'TEACHER_UPDATED',
+      entityType: 'teacher',
+      entityId: teacher.id,
+      details: `Updated faculty member details for ${teacher.name} (${teacher.username}).`,
+    });
+
+    this.save();
+    return teacher;
+  }
+
+  public deleteTeacher(id: string, actor: UserSession): boolean {
+    const idx = this.data.teachers.findIndex((t) => t.id === id);
+    if (idx === -1) throw new Error(`Teacher with ID ${id} not found.`);
+
+    const deleted = this.data.teachers.splice(idx, 1)[0];
+
+    this.logAudit({
+      actorId: actor.id,
+      actorName: actor.name,
+      actorRole: actor.role,
+      action: 'TEACHER_DELETED',
+      entityType: 'teacher',
+      entityId: id,
+      details: `Removed faculty member ${deleted.name} (${deleted.username}).`,
+    });
+
+    this.save();
+    return true;
   }
 
   // --- Audit Logs ---

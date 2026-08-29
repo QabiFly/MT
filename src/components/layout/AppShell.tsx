@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext.js';
 import { useApp } from '../../context/AppContext.js';
 import { TopHeader } from './TopHeader.js';
 import { BottomNav } from './BottomNav.js';
+import { Sidebar } from './Sidebar.js';
 import { ToastContainer } from './ToastContainer.js';
 import { LoginPage } from '../auth/LoginPage.js';
 import { DeveloperDashboard } from '../dashboard/DeveloperDashboard.js';
@@ -125,6 +126,9 @@ export const AppShell: React.FC = () => {
 
         <BottomNav />
       </div>
+
+      {/* Global Sidebar Drawer */}
+      <Sidebar />
 
       {/* Global Modals */}
       {isAddStudentModalOpen && (

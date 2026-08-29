@@ -26,6 +26,8 @@ export interface ToastNotification {
 interface AppContextType {
   activeTab: NavTab;
   setActiveTab: (tab: NavTab) => void;
+  isSidebarOpen: boolean;
+  setIsSidebarOpen: (val: boolean | ((prev: boolean) => boolean)) => void;
   isMobileFrame: boolean;
   setIsMobileFrame: (val: boolean | ((prev: boolean) => boolean)) => void;
   isOnline: boolean;
@@ -50,6 +52,7 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [isMobileFrame, setIsMobileFrame] = useState<boolean>(() => {
     // Default to true if user is on desktop to provide the requested "mobile app feel inside desktop browser"
     if (typeof window !== 'undefined') {
@@ -208,6 +211,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       value={{
         activeTab,
         setActiveTab,
+        isSidebarOpen,
+        setIsSidebarOpen,
         isMobileFrame,
         setIsMobileFrame,
         isOnline,

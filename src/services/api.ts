@@ -636,24 +636,79 @@ export const api = {
     return res.json();
   },
 
-  // Teachers & Audit
+  // Teachers & Faculty
   async getTeachers(): Promise<{ teachers: Teacher[] }> {
-    const res = await fetch(`${API_BASE}/teachers`, { headers: getAuthHeaders() });
-    if (!res.ok) return { teachers: [] };
-    return res.json();
+    try {
+      const res = await fetch(`${API_BASE}/teachers`, { headers: getAuthHeaders() });
+      if (res.ok) return res.json();
+    } catch (e) {}
+    const store = getLocalStore();
+    return { teachers: store.teachers || [] };
   },
 
   async createTeacher(teacher: any): Promise<{ teacher: Teacher }> {
-    const res = await fetch(`${API_BASE}/teachers`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(teacher),
-    });
-    if (!res.ok) {
+    try {
+      const res = await fetch(`${API_BASE}/teachers`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(teacher),
+      });
+      if (res.ok) return res.json();
       const err = await res.json().catch(() => ({ error: 'Failed to create teacher' }));
       throw new Error(err.error || 'Error creating teacher');
+    } catch (e: any) {
+      if (e.message && e.message !== 'Failed to fetch') throw e;
     }
-    return res.json();
+
+    const store = getLocalStore();
+    const newTeacher: Teacher = {
+      ...teacher,
+      id: `teach-${Date.now()}`,
+      joinedDate: new Date().toISOString().split('T')[0],
+      active: true,
+    };
+    store.teachers.push(newTeacher);
+    saveLocalStore(store);
+    return { teacher: newTeacher };
+  },
+
+  async updateTeacher(id: string, updates: Partial<Teacher>): Promise<{ teacher: Teacher }> {
+    try {
+      const res = await fetch(`${API_BASE}/teachers/${id}`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(updates),
+      });
+      if (res.ok) return res.json();
+    } catch (e) {}
+
+    const store = getLocalStore();
+    const idx = store.teachers.findIndex((t) => t.id === id);
+    if (idx !== -1) {
+      store.teachers[idx] = { ...store.teachers[idx], ...updates };
+      saveLocalStore(store);
+      return { teacher: store.teachers[idx] };
+    }
+    return { teacher: { id, ...updates } as Teacher };
+  },
+
+  async deleteTeacher(id: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${API_BASE}/teachers/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+      if (res.ok) return true;
+    } catch (e) {}
+
+    const store = getLocalStore();
+    const idx = store.teachers.findIndex((t) => t.id === id);
+    if (idx !== -1) {
+      store.teachers.splice(idx, 1);
+      saveLocalStore(store);
+      return true;
+    }
+    return false;
   },
 
   async getAuditLogs(params?: { entityType?: string; actorRole?: string; limit?: number }): Promise<{ logs: AuditLog[] }> {

@@ -343,6 +343,26 @@ app.post('/api/teachers', requireRole(['developer']), (req, res) => {
   }
 });
 
+app.put('/api/teachers/:id', requireRole(['developer']), (req, res) => {
+  try {
+    const actor = (req as any).userSession;
+    const teacher = db.updateTeacher(req.params.id, req.body, actor);
+    res.json({ teacher });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.delete('/api/teachers/:id', requireRole(['developer']), (req, res) => {
+  try {
+    const actor = (req as any).userSession;
+    const success = db.deleteTeacher(req.params.id, actor);
+    res.json({ success });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Audit Logs API
 app.get('/api/audit-logs', requireRole(['developer', 'teacher']), (req, res) => {
   const logs = db.getAuditLogs({

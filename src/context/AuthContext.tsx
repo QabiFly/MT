@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { UserSession, UserRole } from '../types/index.js';
+import { UserSession } from '../types/index.js';
 import { api } from '../services/api.js';
 
 interface AuthContextType {
@@ -7,7 +7,6 @@ interface AuthContextType {
   isLoading: boolean;
   login: (payload: { role: string; username?: string; password?: string; rollNumber?: number; dob?: string }) => Promise<void>;
   logout: () => Promise<void>;
-  switchUserRolePreset: (preset: 'developer' | 'teacher' | 'student1' | 'student2') => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -57,20 +56,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
   };
 
-  const switchUserRolePreset = async (preset: 'developer' | 'teacher' | 'student1' | 'student2') => {
-    if (preset === 'developer') {
-      await login({ role: 'developer', username: 'zeaipc', password: 'arman786' });
-    } else if (preset === 'teacher') {
-      await login({ role: 'teacher', username: 'teacher1', password: 'teach123' });
-    } else if (preset === 'student1') {
-      await login({ role: 'student', rollNumber: 1, dob: '2009-05-14' });
-    } else if (preset === 'student2') {
-      await login({ role: 'student', rollNumber: 2, dob: '2009-08-22' });
-    }
-  };
-
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout, switchUserRolePreset }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
