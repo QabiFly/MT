@@ -1,5 +1,4 @@
-import fs from 'fs';
-import path from 'path';
+import pg from 'pg';
 import crypto from 'crypto';
 import {
   Student,
@@ -11,89 +10,73 @@ import {
   Teacher,
   AuditLog,
   UserSession,
-  UserRole,
-  FeeStatus,
-  AttendanceStatus,
-  DoubtStatus,
 } from '../src/types/index.js';
 
-interface DatabaseData {
-  students: Student[];
-  attendance: AttendanceRecord[];
-  feeRecords: FeeRecord[];
-  notices: Notice[];
-  doubts: Doubt[];
-  teachers: Teacher[];
-  auditLogs: AuditLog[];
-}
+const { Pool } = pg;
 
-const DB_FILE = path.join(process.cwd(), 'tuition_data.json');
-
-class DatabaseService {
-  private data: DatabaseData = {
-    students: [],
-    attendance: [],
-    feeRecords: [],
-    notices: [],
-    doubts: [],
-    teachers: [],
-    auditLogs: [],
-  };
+export class PostgresDatabaseService {
+  private pool: pg.Pool | null = null;
+  private isConnected: boolean = false;
 
   constructor() {
-    this.init();
+    this.initPool();
   }
 
-  private init() {
+  private initPool() {
+    const dbUrl = process.env.DATABASE_URL;
+    if (!dbUrl) {
+      console.warn('DATABASE_URL environment variable is missing!');
+      return;
+    }
+
     try {
-      if (fs.existsSync(DB_FILE)) {
-        const fileContent = fs.readFileSync(DB_FILE, 'utf-8');
-        this.data = JSON.parse(fileContent);
-      } else {
-        this.seedInitialData();
-        this.save();
-      }
-    } catch (err) {
-      console.warn('Error reading tuition_data.json, re-seeding default data:', err);
-      this.seedInitialData();
-      this.save();
+      this.pool = new Pool({
+        connectionString: dbUrl,
+        ssl: dbUrl.includes('sslmode=require') ? { rejectUnauthorized: false } : undefined,
+        max: 10,
+        idleTimeoutMillis: 30000,
+      });
+
+      this.pool.on('error', (err) => {
+        console.error('Unexpected error on idle PostgreSQL client', err);
+      });
+    } catch (e) {
+      console.error('Failed to initialize PostgreSQL pool:', e);
     }
   }
 
-  public save() {
-    try {
-      fs.writeFileSync(DB_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
-    } catch (err) {
-      console.error('Failed to persist database file:', err);
+  public async getClient(): Promise<pg.PoolClient> {
+    if (!this.pool) {
+      this.initPool();
     }
+    if (!this.pool) {
+      throw new Error('DATABASE_URL is not configured. Real PostgreSQL connection required.');
+    }
+    return this.pool.connect();
   }
 
-  public seedInitialData() {
-    // Start completely clean - No mock students or mock teachers
-    // Developer adds teachers and teachers add students
-    this.data.teachers = [];
-    this.data.students = [];
-    this.data.attendance = [];
-    this.data.feeRecords = [];
-    this.data.notices = [];
-    this.data.doubts = [];
-    this.data.auditLogs = [
-      {
-        id: `aud-init-${Date.now()}`,
-        timestamp: new Date().toISOString(),
-        actorId: 'dev-001',
-        actorName: 'Zeaipc (Admin)',
-        actorRole: 'developer',
-        action: 'SYSTEM_INITIALIZED',
-        entityType: 'system',
-        details: 'Manasthali Tutions database initialized in clean production mode. Ready for faculty and student enrollment.',
-      },
-    ];
+  public async query(text: string, params: any[] = []): Promise<pg.QueryResult> {
+    if (!this.pool) {
+      this.initPool();
+    }
+    if (!this.pool) {
+      throw new Error('DATABASE_URL is not configured. Real PostgreSQL connection required.');
+    }
+    return this.pool.query(text, params);
+  }
+
+  public async checkHealth(): Promise<{ healthy: boolean; message?: string }> {
+    try {
+      const res = await this.query('SELECT NOW() as server_time');
+      return { healthy: true, message: `Connected to PostgreSQL. Time: ${res.rows[0]?.server_time}` };
+    } catch (err: any) {
+      return { healthy: false, message: err.message || 'Failed to connect to PostgreSQL' };
+    }
   }
 
   // --- Auth Methods ---
 
-  public authenticateDeveloper(username: string, password: string): UserSession | null {
+  public async authenticateDeveloper(username: string, password: string): Promise<UserSession | null> {
     const cleanUser = (username || '').trim().toLowerCase();
     const cleanPass = (password || '').trim();
 
@@ -107,7 +90,7 @@ class DatabaseService {
     const isPassValid = validPasswords.includes(cleanPass);
 
     if (isUserValid && isPassValid) {
-      this.logAudit({
+      await this.logAudit({
         actorId: 'dev-001',
         actorName: 'Zeaipc (Developer/Superadmin)',
         actorRole: 'developer',
@@ -127,839 +110,1044 @@ class DatabaseService {
     return null;
   }
 
-  public authenticateTeacher(username: string, password: string): UserSession | null {
+  public async authenticateTeacher(username: string, password: string): Promise<UserSession | null> {
     const cleanUser = (username || '').trim().toLowerCase();
     const cleanPass = (password || '').trim();
 
-    const teacher = this.data.teachers.find(
-      (t) => (t.username.toLowerCase() === cleanUser || (t.email && t.email.toLowerCase() === cleanUser)) && t.active
+    const res = await this.query(
+      `SELECT * FROM teachers WHERE (LOWER(username) = $1 OR LOWER(email) = $1) AND active = TRUE LIMIT 1`,
+      [cleanUser]
     );
 
-    if (!teacher) return null;
+    if (res.rows.length === 0) return null;
+    const teacherRow = res.rows[0];
 
-    // Check teacher set password or standard system fallback passwords
-    const validPasswords = ['teach123', 'arman786', 'password', 'admin123', 'teacher123'];
+    const validFallbackPasswords = ['teach123', 'arman786', 'password', 'admin123', 'teacher123'];
     const isPassCorrect =
-      (teacher.password && teacher.password === cleanPass) ||
-      validPasswords.includes(cleanPass) ||
+      (teacherRow.password && teacherRow.password === cleanPass) ||
+      validFallbackPasswords.includes(cleanPass) ||
       cleanPass === 'teach123';
 
     if (isPassCorrect) {
-      this.logAudit({
-        actorId: teacher.id,
-        actorName: teacher.name,
+      await this.logAudit({
+        actorId: teacherRow.id,
+        actorName: teacherRow.name,
         actorRole: 'teacher',
         action: 'USER_LOGIN',
         entityType: 'auth',
-        details: `Teacher ${teacher.name} (${teacher.username}) logged in.`,
+        details: `Faculty member ${teacherRow.name} signed in successfully.`,
       });
+
       return {
-        id: teacher.id,
-        username: teacher.username,
-        name: teacher.name,
+        id: teacherRow.id,
+        username: teacherRow.username,
+        name: teacherRow.name,
         role: 'teacher',
-        email: teacher.email,
-        assignedClasses: teacher.assignedClasses,
-        avatarUrl: teacher.photoUrl,
+        email: teacherRow.email,
+        assignedClasses: teacherRow.assigned_classes || [],
+        avatarUrl: teacherRow.photo_url,
       };
     }
     return null;
   }
 
-  public authenticateStudent(rollNumber: number | string, dob: string): UserSession | null {
-    const numRoll = Number(rollNumber);
-    if (isNaN(numRoll) || !dob) return null;
+  public async authenticateStudent(rollNumber: number, dob: string): Promise<UserSession | null> {
+    if (!rollNumber || isNaN(rollNumber) || !dob) return null;
 
-    const normalizeDob = (d: string): string => {
-      if (!d) return '';
-      const clean = d.trim();
-      const parts = clean.split(/[-/]/);
-      if (parts.length === 3) {
-        if (parts[0].length === 4) {
-          // YYYY-MM-DD
-          return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
-        } else if (parts[2].length === 4) {
-          // DD-MM-YYYY
-          return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-        }
-      }
-      return clean;
-    };
-
-    const targetDob = normalizeDob(dob);
-
-    const student = this.data.students.find(
-      (s) => s.rollNumber === numRoll && (s.dob === targetDob || normalizeDob(s.dob) === targetDob) && s.active
+    const cleanDob = (dob || '').trim();
+    const res = await this.query(
+      `SELECT * FROM students WHERE roll_number = $1 AND active = TRUE LIMIT 1`,
+      [rollNumber]
     );
 
-    if (student) {
-      this.logAudit({
+    if (res.rows.length === 0) return null;
+    const student = res.rows[0];
+
+    const normalize = (d: string) => {
+      const parts = (d || '').trim().split(/[-/]/);
+      if (parts.length === 3) {
+        if (parts[0].length === 4) return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        if (parts[2].length === 4) return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+      }
+      return (d || '').trim();
+    };
+
+    if (student.dob === cleanDob || normalize(student.dob) === normalize(cleanDob)) {
+      await this.logAudit({
         actorId: student.id,
-        actorName: student.fullName,
+        actorName: student.full_name,
         actorRole: 'student',
-        action: 'STUDENT_LOGIN',
+        action: 'USER_LOGIN',
         entityType: 'auth',
-        entityId: student.id,
-        details: `Student ${student.fullName} (Roll #${student.rollNumber}, DOB: ${student.dob}) logged in.`,
+        details: `Student ${student.full_name} (Roll #${student.roll_number}) signed in successfully.`,
       });
+
       return {
         id: student.id,
-        username: `roll_${student.rollNumber}`,
-        name: student.fullName,
+        username: `roll_${student.roll_number}`,
+        name: student.full_name,
         role: 'student',
         email: student.email,
-        rollNumber: student.rollNumber,
+        rollNumber: student.roll_number,
         studentId: student.id,
-        avatarUrl: student.photoUrl,
+        avatarUrl: student.photo_url,
       };
     }
+
     return null;
   }
 
-  // --- Students CRUD & Sequential Roll Number ---
+  // --- Student Management ---
 
-  public getNextRollNumber(): number {
-    if (this.data.students.length === 0) {
-      return 1;
-    }
-    const maxRoll = Math.max(...this.data.students.map((s) => s.rollNumber || 0));
-    return maxRoll + 1;
-  }
-
-  public getStudents(params?: {
-    search?: string;
+  public async getStudents(filters?: {
     className?: string;
+    search?: string;
     feeStatus?: string;
-    sortBy?: string;
-    page?: number;
-    limit?: number;
-  }) {
-    let list = [...this.data.students];
+  }): Promise<Student[]> {
+    let queryText = `SELECT * FROM students WHERE active = TRUE`;
+    const params: any[] = [];
+    let pIdx = 1;
 
-    // Search by Name or DOB
-    if (params?.search) {
-      const q = params.search.toLowerCase().trim();
-      list = list.filter(
-        (s) =>
-          s.fullName.toLowerCase().includes(q) ||
-          s.dob.includes(q) ||
-          s.rollNumber.toString() === q ||
-          s.mobileNumber.includes(q)
-      );
+    if (filters?.className && filters.className !== 'All') {
+      queryText += ` AND class_name = $${pIdx++}`;
+      params.push(filters.className);
     }
 
-    // Filter by Class
-    if (params?.className && params.className !== 'All') {
-      list = list.filter((s) => s.className === params.className);
+    if (filters?.feeStatus && filters.feeStatus !== 'all') {
+      queryText += ` AND fee_paid_status = $${pIdx++}`;
+      params.push(filters.feeStatus);
     }
 
-    // Filter by Fee status
-    if (params?.feeStatus && params.feeStatus !== 'All') {
-      list = list.filter((s) => s.feePaidStatus === params.feeStatus);
+    if (filters?.search && filters.search.trim()) {
+      const s = `%${filters.search.trim()}%`;
+      queryText += ` AND (full_name ILIKE $${pIdx} OR roll_number::text ILIKE $${pIdx} OR mobile_number ILIKE $${pIdx})`;
+      params.push(s);
+      pIdx++;
     }
 
-    // Compute attendance statistics per student
-    list = list.map((stu) => {
-      const stuAtt = this.data.attendance.filter((a) => a.studentId === stu.id);
-      const totalDays = stuAtt.length;
-      const totalPresent = stuAtt.filter((a) => a.status === 'present' || a.status === 'late').length;
-      const attendancePercentage = totalDays > 0 ? Math.round((totalPresent / totalDays) * 100) : 100;
-      return {
-        ...stu,
-        totalDays,
-        totalPresent,
-        attendancePercentage,
-      };
-    });
+    queryText += ` ORDER BY roll_number ASC`;
 
-    // Sort options
-    if (params?.sortBy) {
-      switch (params.sortBy) {
-        case 'a-z':
-          list.sort((a, b) => a.fullName.localeCompare(b.fullName));
-          break;
-        case 'z-a':
-          list.sort((a, b) => b.fullName.localeCompare(a.fullName));
-          break;
-        case 'roll-asc':
-          list.sort((a, b) => a.rollNumber - b.rollNumber);
-          break;
-        case 'roll-desc':
-          list.sort((a, b) => b.rollNumber - a.rollNumber);
-          break;
-        case 'highest-attendance':
-          list.sort((a, b) => (b.attendancePercentage || 0) - (a.attendancePercentage || 0));
-          break;
-        case 'lowest-fees-due':
-          list.sort((a, b) => (a.feeDueAmount || 0) - (b.feeDueAmount || 0));
-          break;
-        case 'highest-fees-due':
-          list.sort((a, b) => (b.feeDueAmount || 0) - (a.feeDueAmount || 0));
-          break;
-        case 'paid-first':
-          list.sort((a, b) => (a.feePaidStatus === 'paid' ? -1 : 1));
-          break;
-        case 'unpaid-first':
-          list.sort((a, b) => (a.feePaidStatus === 'unpaid' ? -1 : 1));
-          break;
-        case 'class':
-          list.sort((a, b) => a.className.localeCompare(b.className) || a.rollNumber - b.rollNumber);
-          break;
-        default:
-          list.sort((a, b) => a.rollNumber - b.rollNumber);
-          break;
-      }
-    } else {
-      list.sort((a, b) => a.rollNumber - b.rollNumber);
-    }
-
-    const total = list.length;
-    const page = params?.page || 1;
-    const limit = params?.limit || 50;
-    const startIndex = (page - 1) * limit;
-    const paginated = list.slice(startIndex, startIndex + limit);
-
-    return {
-      students: paginated,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-      allClasses: Array.from(new Set(this.data.students.map((s) => s.className))).sort(),
-    };
+    const res = await this.query(queryText, params);
+    return res.rows.map(this.mapStudentRow);
   }
 
-  public getStudentById(id: string): Student | null {
-    const stu = this.data.students.find((s) => s.id === id);
-    if (!stu) return null;
-
-    const stuAtt = this.data.attendance.filter((a) => a.studentId === stu.id);
-    const totalDays = stuAtt.length;
-    const totalPresent = stuAtt.filter((a) => a.status === 'present' || a.status === 'late').length;
-    const attendancePercentage = totalDays > 0 ? Math.round((totalPresent / totalDays) * 100) : 100;
-
-    return {
-      ...stu,
-      totalDays,
-      totalPresent,
-      attendancePercentage,
-    };
+  public async getStudentById(id: string): Promise<Student | null> {
+    const res = await this.query(`SELECT * FROM students WHERE id = $1 LIMIT 1`, [id]);
+    if (res.rows.length === 0) return null;
+    return this.mapStudentRow(res.rows[0]);
   }
 
-  public createStudent(
-    studentData: Omit<Student, 'id' | 'rollNumber' | 'createdAt' | 'updatedAt'>,
+  public async getStudentByRollNumber(rollNumber: number): Promise<Student | null> {
+    const res = await this.query(`SELECT * FROM students WHERE roll_number = $1 LIMIT 1`, [rollNumber]);
+    if (res.rows.length === 0) return null;
+    return this.mapStudentRow(res.rows[0]);
+  }
+
+  public async createStudent(
+    studentData: Omit<Student, 'id' | 'createdAt' | 'updatedAt' | 'active'>,
     actor: UserSession
-  ): Student {
-    // Validation
-    if (!studentData.fullName || studentData.fullName.trim().length === 0) {
-      throw new Error('Student Full Name is required.');
-    }
-    if (!studentData.mobileNumber || studentData.mobileNumber.trim().length < 7) {
-      throw new Error('A valid Mobile Number is required.');
-    }
-    if (!studentData.address || studentData.address.trim().length === 0) {
-      throw new Error('Address is required.');
-    }
-    if (!studentData.className || studentData.className.trim().length === 0) {
-      throw new Error('Class name is required.');
-    }
-    if (!studentData.dob) {
-      throw new Error('Date of Birth is required.');
-    }
-    if (!studentData.dateOfJoining) {
-      throw new Error('Date of Joining is required.');
+  ): Promise<Student> {
+    const existing = await this.getStudentByRollNumber(studentData.rollNumber);
+    if (existing) {
+      throw new Error(`Roll Number ${studentData.rollNumber} is already registered for ${existing.fullName}.`);
     }
 
-    // Auto-generate sequential roll number starting from 1
-    const nextRollNumber = this.getNextRollNumber();
-    const id = `stu-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-    const now = new Date().toISOString();
+    const id = `std-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const dueAmount = studentData.feeDueAmount ?? (studentData.feePaidStatus === 'paid' ? 0 : 2500);
+    const paidAmount = studentData.feePaidAmount ?? (studentData.feePaidStatus === 'paid' ? 2500 : 0);
 
-    const newStudent: Student = {
-      ...studentData,
+    const queryText = `
+      INSERT INTO students (
+        id, roll_number, full_name, mobile_number, email, photo_url,
+        address, class_name, dob, date_of_joining, fee_paid_status,
+        fee_due_amount, fee_paid_amount, fee_last_paid_date, payment_mode,
+        notes, active, created_by_teacher_id, created_by_name, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11,
+        $12, $13, $14, $15,
+        $16, TRUE, $17, $18, NOW(), NOW()
+      ) RETURNING *;
+    `;
+
+    const values = [
       id,
-      rollNumber: nextRollNumber,
-      fullName: studentData.fullName.trim(),
-      mobileNumber: studentData.mobileNumber.trim(),
-      email: studentData.email?.trim() || undefined,
-      photoUrl: studentData.photoUrl || undefined,
-      address: studentData.address.trim(),
-      className: studentData.className.trim(),
-      dob: studentData.dob,
-      dateOfJoining: studentData.dateOfJoining,
-      feePaidStatus: studentData.feePaidStatus || 'unpaid',
-      feeDueAmount: studentData.feeDueAmount || 0,
-      feePaidAmount: studentData.feePaidAmount || 0,
-      notes: studentData.notes?.trim() || '',
-      active: true,
-      createdByTeacherId: actor.id,
-      createdByName: actor.name,
-      createdAt: now,
-      updatedAt: now,
-    };
+      studentData.rollNumber,
+      studentData.fullName.trim(),
+      studentData.mobileNumber.trim(),
+      studentData.email?.trim() || null,
+      studentData.photoUrl || null,
+      studentData.address.trim(),
+      studentData.className,
+      studentData.dob.trim(),
+      studentData.dateOfJoining || new Date().toISOString().split('T')[0],
+      studentData.feePaidStatus || 'unpaid',
+      dueAmount,
+      paidAmount,
+      studentData.feeLastPaidDate || null,
+      studentData.paymentMode || 'cash',
+      studentData.notes || null,
+      actor.id,
+      actor.name,
+    ];
 
-    this.data.students.push(newStudent);
+    const res = await this.query(queryText, values);
+    const created = this.mapStudentRow(res.rows[0]);
 
-    // Initial audit log
-    this.logAudit({
+    await this.logAudit({
       actorId: actor.id,
       actorName: actor.name,
       actorRole: actor.role,
-      action: 'STUDENT_CREATED',
+      action: 'STUDENT_ENROLLED',
       entityType: 'student',
-      entityId: newStudent.id,
-      details: `Created new student: ${newStudent.fullName} with Auto-Assigned Roll Number #${newStudent.rollNumber} in ${newStudent.className}. Mobile: ${newStudent.mobileNumber}`,
+      entityId: created.id,
+      details: `Enrolled student ${created.fullName} (Roll #${created.rollNumber}) in ${created.className}.`,
     });
 
-    this.save();
-    return newStudent;
+    return created;
   }
 
-  public updateStudent(id: string, updates: Partial<Student>, actor: UserSession): Student {
-    const index = this.data.students.findIndex((s) => s.id === id);
-    if (index === -1) {
-      throw new Error(`Student with ID ${id} not found.`);
+  public async updateStudent(id: string, updates: Partial<Student>, actor: UserSession): Promise<Student> {
+    const current = await this.getStudentById(id);
+    if (!current) throw new Error(`Student with ID ${id} not found.`);
+
+    if (updates.rollNumber && updates.rollNumber !== current.rollNumber) {
+      const clash = await this.getStudentByRollNumber(updates.rollNumber);
+      if (clash && clash.id !== id) {
+        throw new Error(`Roll Number ${updates.rollNumber} is already in use by ${clash.fullName}.`);
+      }
     }
 
-    const existing = this.data.students[index];
-    const updated: Student = {
-      ...existing,
-      ...updates,
-      id: existing.id,
-      rollNumber: existing.rollNumber, // Preserve sequential roll number
-      updatedAt: new Date().toISOString(),
-    };
+    const queryText = `
+      UPDATE students SET
+        roll_number = COALESCE($2, roll_number),
+        full_name = COALESCE($3, full_name),
+        mobile_number = COALESCE($4, mobile_number),
+        email = COALESCE($5, email),
+        photo_url = COALESCE($6, photo_url),
+        address = COALESCE($7, address),
+        class_name = COALESCE($8, class_name),
+        dob = COALESCE($9, dob),
+        date_of_joining = COALESCE($10, date_of_joining),
+        fee_paid_status = COALESCE($11, fee_paid_status),
+        fee_due_amount = COALESCE($12, fee_due_amount),
+        fee_paid_amount = COALESCE($13, fee_paid_amount),
+        fee_last_paid_date = COALESCE($14, fee_last_paid_date),
+        payment_mode = COALESCE($15, payment_mode),
+        notes = COALESCE($16, notes),
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING *;
+    `;
 
-    this.data.students[index] = updated;
+    const values = [
+      id,
+      updates.rollNumber ?? null,
+      updates.fullName ? updates.fullName.trim() : null,
+      updates.mobileNumber ? updates.mobileNumber.trim() : null,
+      updates.email !== undefined ? updates.email?.trim() || null : null,
+      updates.photoUrl !== undefined ? updates.photoUrl || null : null,
+      updates.address ? updates.address.trim() : null,
+      updates.className ?? null,
+      updates.dob ? updates.dob.trim() : null,
+      updates.dateOfJoining ?? null,
+      updates.feePaidStatus ?? null,
+      updates.feeDueAmount !== undefined ? updates.feeDueAmount : null,
+      updates.feePaidAmount !== undefined ? updates.feePaidAmount : null,
+      updates.feeLastPaidDate !== undefined ? updates.feeLastPaidDate : null,
+      updates.paymentMode !== undefined ? updates.paymentMode : null,
+      updates.notes !== undefined ? updates.notes : null,
+    ];
 
-    this.logAudit({
+    const res = await this.query(queryText, values);
+    const updated = this.mapStudentRow(res.rows[0]);
+
+    await this.logAudit({
       actorId: actor.id,
       actorName: actor.name,
       actorRole: actor.role,
       action: 'STUDENT_UPDATED',
       entityType: 'student',
       entityId: id,
-      details: `Updated details for ${updated.fullName} (Roll #${updated.rollNumber}). Changes: ${Object.keys(updates).join(', ')}`,
+      details: `Updated details for ${updated.fullName} (Roll #${updated.rollNumber}).`,
     });
 
-    this.save();
     return updated;
   }
 
-  public deleteStudent(id: string, actor: UserSession): boolean {
-    const index = this.data.students.findIndex((s) => s.id === id);
-    if (index === -1) return false;
+  public async deleteStudent(id: string, actor: UserSession): Promise<boolean> {
+    const student = await this.getStudentById(id);
+    if (!student) throw new Error(`Student with ID ${id} not found.`);
 
-    const student = this.data.students[index];
-    this.data.students.splice(index, 1);
+    await this.query(`DELETE FROM students WHERE id = $1`, [id]);
 
-    // Cleanup related records
-    this.data.attendance = this.data.attendance.filter((a) => a.studentId !== id);
-    this.data.feeRecords = this.data.feeRecords.filter((f) => f.studentId !== id);
-    this.data.doubts = this.data.doubts.filter((d) => d.studentId !== id);
-
-    this.logAudit({
+    await this.logAudit({
       actorId: actor.id,
       actorName: actor.name,
       actorRole: actor.role,
       action: 'STUDENT_DELETED',
       entityType: 'student',
       entityId: id,
-      details: `Deleted student record: ${student.fullName} (Roll #${student.rollNumber}, ${student.className})`,
+      details: `Permanently removed student ${student.fullName} (Roll #${student.rollNumber}).`,
     });
 
-    this.save();
     return true;
   }
 
   // --- Attendance ---
 
-  public getAttendanceByDate(date: string, className?: string) {
-    let list = this.data.attendance.filter((a) => a.date === date);
-    if (className && className !== 'All') {
-      list = list.filter((a) => a.className === className);
+  public async getAttendance(params?: {
+    className?: string;
+    date?: string;
+    studentId?: string;
+    studentRoll?: number;
+  }): Promise<AttendanceRecord[]> {
+    let queryText = `SELECT * FROM attendance WHERE 1=1`;
+    const values: any[] = [];
+    let pIdx = 1;
+
+    if (params?.className && params.className !== 'All') {
+      queryText += ` AND class_name = $${pIdx++}`;
+      values.push(params.className);
     }
-    return list;
+    if (params?.date) {
+      queryText += ` AND date = $${pIdx++}`;
+      values.push(params.date);
+    }
+    if (params?.studentId) {
+      queryText += ` AND student_id = $${pIdx++}`;
+      values.push(params.studentId);
+    }
+    if (params?.studentRoll) {
+      queryText += ` AND student_roll = $${pIdx++}`;
+      values.push(params.studentRoll);
+    }
+
+    queryText += ` ORDER BY date DESC, student_roll ASC`;
+    const res = await this.query(queryText, values);
+    return res.rows.map(this.mapAttendanceRow);
   }
 
-  public getStudentAttendanceHistory(studentId: string) {
-    return this.data.attendance
-      .filter((a) => a.studentId === studentId)
-      .sort((a, b) => b.date.localeCompare(a.date));
-  }
-
-  public markAttendanceBatch(
-    records: { studentId: string; status: AttendanceStatus; notes?: string }[],
-    date: string,
+  public async markAttendanceBatch(
+    records: Array<{
+      studentId: string;
+      studentRoll: number;
+      studentName: string;
+      className: string;
+      date: string;
+      status: 'present' | 'absent' | 'late';
+      remarks?: string;
+    }>,
     actor: UserSession
-  ) {
-    const now = new Date().toISOString();
-    let updatedCount = 0;
+  ): Promise<AttendanceRecord[]> {
+    const results: AttendanceRecord[] = [];
 
-    records.forEach((rec) => {
-      const student = this.data.students.find((s) => s.id === rec.studentId);
-      if (!student) return;
-
-      const existingIndex = this.data.attendance.findIndex(
-        (a) => a.studentId === rec.studentId && a.date === date
+    for (const rec of records) {
+      const existing = await this.query(
+        `SELECT id FROM attendance WHERE student_id = $1 AND date = $2 LIMIT 1`,
+        [rec.studentId, rec.date]
       );
 
-      if (existingIndex !== -1) {
-        this.data.attendance[existingIndex] = {
-          ...this.data.attendance[existingIndex],
-          status: rec.status,
-          notes: rec.notes || this.data.attendance[existingIndex].notes,
-          markedBy: actor.id,
-          markedByName: actor.name,
-          updatedAt: now,
-        };
+      if (existing.rows.length > 0) {
+        const updateRes = await this.query(
+          `UPDATE attendance SET
+             status = $2, marked_by = $3, marked_by_name = $4, remarks = $5, updated_at = NOW()
+           WHERE id = $1 RETURNING *`,
+          [existing.rows[0].id, rec.status, actor.id, actor.name, rec.remarks || null]
+        );
+        results.push(this.mapAttendanceRow(updateRes.rows[0]));
       } else {
-        this.data.attendance.push({
-          id: `att-${rec.studentId}-${date}`,
-          studentId: rec.studentId,
-          studentRoll: student.rollNumber,
-          studentName: student.fullName,
-          className: student.className,
-          date,
-          status: rec.status,
-          markedBy: actor.id,
-          markedByName: actor.name,
-          notes: rec.notes,
-          updatedAt: now,
-        });
+        const id = `att-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const insertRes = await this.query(
+          `INSERT INTO attendance (
+             id, student_id, student_roll, student_name, class_name,
+             date, status, marked_by, marked_by_name, remarks, created_at, updated_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW()) RETURNING *`,
+          [
+            id,
+            rec.studentId,
+            rec.studentRoll,
+            rec.studentName,
+            rec.className,
+            rec.date,
+            rec.status,
+            actor.id,
+            actor.name,
+            rec.remarks || null,
+          ]
+        );
+        results.push(this.mapAttendanceRow(insertRes.rows[0]));
       }
-      updatedCount++;
-    });
+    }
 
-    this.logAudit({
+    await this.logAudit({
       actorId: actor.id,
       actorName: actor.name,
       actorRole: actor.role,
-      action: 'ATTENDANCE_BATCH_MARKED',
+      action: 'ATTENDANCE_MARKED',
       entityType: 'attendance',
-      details: `Marked attendance for ${updatedCount} students on date ${date}.`,
+      details: `Saved attendance records for ${records.length} students on ${records[0]?.date || 'today'}.`,
     });
 
-    this.save();
-    return { success: true, count: updatedCount, date };
+    return results;
   }
 
-  // --- Fee Records & Business Safeguards ---
+  // --- Fee Records ---
 
-  public getFeeOverview() {
-    const totalStudents = this.data.students.length;
-    const paidStudents = this.data.students.filter((s) => s.feePaidStatus === 'paid').length;
-    const unpaidStudents = this.data.students.filter((s) => s.feePaidStatus === 'unpaid').length;
-    const totalCollected = this.data.students.reduce((sum, s) => sum + (s.feePaidAmount || 0), 0);
-    const totalDue = this.data.students.reduce((sum, s) => sum + (s.feeDueAmount || 0), 0);
+  public async getFeeRecords(params?: {
+    studentId?: string;
+    studentRoll?: number;
+    className?: string;
+    status?: string;
+  }): Promise<FeeRecord[]> {
+    let queryText = `SELECT * FROM fee_records WHERE 1=1`;
+    const values: any[] = [];
+    let pIdx = 1;
 
-    return {
-      totalStudents,
-      paidStudents,
-      unpaidStudents,
-      totalCollected,
-      totalDue,
-      recentTransactions: this.data.feeRecords.slice(-10).reverse(),
-    };
+    if (params?.className && params.className !== 'All') {
+      queryText += ` AND class_name = $${pIdx++}`;
+      values.push(params.className);
+    }
+    if (params?.status && params.status !== 'all') {
+      queryText += ` AND status = $${pIdx++}`;
+      values.push(params.status);
+    }
+    if (params?.studentId) {
+      queryText += ` AND student_id = $${pIdx++}`;
+      values.push(params.studentId);
+    }
+    if (params?.studentRoll) {
+      queryText += ` AND student_roll = $${pIdx++}`;
+      values.push(params.studentRoll);
+    }
+
+    queryText += ` ORDER BY transaction_date DESC, created_at DESC`;
+    const res = await this.query(queryText, values);
+    return res.rows.map(this.mapFeeRow);
   }
 
-  public getStudentFeeRecords(studentId: string) {
-    return this.data.feeRecords
-      .filter((f) => f.studentId === studentId)
-      .sort((a, b) => b.transactionDate.localeCompare(a.transactionDate));
-  }
+  public async createFeeRecord(
+    recordData: {
+      studentId: string;
+      studentRoll: number;
+      studentName: string;
+      className: string;
+      amount: number;
+      dueAmount?: number;
+      status: 'paid' | 'unpaid' | 'partial';
+      paymentMode: 'cash' | 'online' | 'cheque' | 'upi';
+      transactionDate: string;
+      remarks?: string;
+    },
+    actor: UserSession
+  ): Promise<FeeRecord> {
+    const id = `fee-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const receiptNumber = `RCP-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
 
-  public updateFeeStatus(
-    studentId: string,
-    feeStatus: FeeStatus,
-    amount: number,
-    paymentMode: string,
-    remarks: string,
-    actor: UserSession,
-    privilegedConfirmation: boolean = false
-  ) {
-    const student = this.data.students.find((s) => s.id === studentId);
-    if (!student) {
-      throw new Error(`Student ${studentId} not found.`);
-    }
+    const queryText = `
+      INSERT INTO fee_records (
+        id, student_id, student_roll, student_name, class_name,
+        amount, due_amount, status, payment_mode, receipt_number,
+        transaction_date, marked_by, marked_by_name, remarks, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5,
+        $6, $7, $8, $9, $10,
+        $11, $12, $13, $14, NOW(), NOW()
+      ) RETURNING *;
+    `;
 
-    const prevStatus = student.feePaidStatus;
-
-    // Rule 8: Prevent accidental unpaid changes unless special privileged confirmation is used
-    if (prevStatus === 'paid' && feeStatus === 'unpaid' && !privilegedConfirmation) {
-      throw new Error(
-        'Privileged Confirmation Required: Reverting a paid fee status to unpaid requires explicit administrative confirmation.'
-      );
-    }
-
-    const now = new Date().toISOString();
-    const receiptNumber = `REC-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-
-    student.feePaidStatus = feeStatus;
-    if (feeStatus === 'paid') {
-      student.feePaidAmount = (student.feePaidAmount || 0) + amount;
-      student.feeDueAmount = 0;
-      student.feeLastPaidDate = now;
-      student.paymentMode = paymentMode;
-    } else if (feeStatus === 'unpaid') {
-      student.feeDueAmount = amount > 0 ? amount : 500;
-    }
-    student.updatedAt = now;
-
-    // Record transaction
-    const newFeeRecord: FeeRecord = {
-      id: `fee-${Date.now()}`,
-      studentId: student.id,
-      studentRoll: student.rollNumber,
-      studentName: student.fullName,
-      className: student.className,
-      amount,
-      dueAmount: student.feeDueAmount,
-      status: feeStatus,
-      paymentMode,
+    const values = [
+      id,
+      recordData.studentId,
+      recordData.studentRoll,
+      recordData.studentName,
+      recordData.className,
+      recordData.amount,
+      recordData.dueAmount || 0,
+      recordData.status,
+      recordData.paymentMode,
       receiptNumber,
-      transactionDate: now,
-      markedBy: actor.id,
-      markedByName: actor.name,
-      remarks: remarks || `Fee status updated to ${feeStatus.toUpperCase()}`,
-      createdAt: now,
-      updatedAt: now,
-    };
+      recordData.transactionDate,
+      actor.id,
+      actor.name,
+      recordData.remarks || null,
+    ];
 
-    this.data.feeRecords.push(newFeeRecord);
+    const res = await this.query(queryText, values);
+    const created = this.mapFeeRow(res.rows[0]);
 
-    this.logAudit({
+    // Update student's fee paid status & balances
+    await this.query(
+      `UPDATE students SET
+         fee_paid_status = $2,
+         fee_paid_amount = fee_paid_amount + $3,
+         fee_due_amount = $4,
+         fee_last_paid_date = $5,
+         payment_mode = $6,
+         updated_at = NOW()
+       WHERE id = $1`,
+      [
+        recordData.studentId,
+        recordData.status,
+        recordData.amount,
+        recordData.dueAmount || 0,
+        recordData.transactionDate,
+        recordData.paymentMode,
+      ]
+    );
+
+    await this.logAudit({
       actorId: actor.id,
       actorName: actor.name,
       actorRole: actor.role,
-      action: feeStatus === 'paid' ? 'FEE_PAID_CONFIRMED' : 'FEE_UNPAID_OVERRIDE',
+      action: 'FEE_PAYMENT_RECORDED',
       entityType: 'fee',
-      entityId: student.id,
-      details: `Updated fee status for ${student.fullName} (Roll #${student.rollNumber}) from ${prevStatus.toUpperCase()} to ${feeStatus.toUpperCase()}. Amount: $${amount}. Receipt: ${receiptNumber}. Privileged: ${privilegedConfirmation}`,
+      entityId: created.id,
+      details: `Collected ₹${recordData.amount} fee for ${recordData.studentName} (Receipt: ${receiptNumber}).`,
     });
 
-    this.save();
-    return { student, feeRecord: newFeeRecord };
+    return created;
   }
 
   // --- Notices ---
 
-  public getNotices(targetClass?: string) {
-    if (!targetClass || targetClass === 'All' || targetClass === 'developer' || targetClass === 'teacher') {
-      return [...this.data.notices].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  public async getNotices(params?: { targetClass?: string; studentId?: string }): Promise<Notice[]> {
+    let queryText = `SELECT * FROM notices WHERE 1=1`;
+    const values: any[] = [];
+    let pIdx = 1;
+
+    if (params?.targetClass && params.targetClass !== 'All') {
+      queryText += ` AND (target_class = 'All' OR target_class = $${pIdx++})`;
+      values.push(params.targetClass);
     }
-    return this.data.notices
-      .filter((n) => n.targetClass === 'All' || n.targetClass === targetClass)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+    queryText += ` ORDER BY created_at DESC`;
+    const res = await this.query(queryText, values);
+    return res.rows.map(this.mapNoticeRow);
   }
 
-  public createNotice(
-    notice: { title: string; content: string; targetClass: string; priority: 'normal' | 'urgent' | 'announcement' },
+  public async createNotice(
+    noticeData: {
+      title: string;
+      content: string;
+      targetClass: string;
+      priority: 'normal' | 'urgent' | 'announcement';
+      attachmentUrl?: string;
+    },
     actor: UserSession
-  ): Notice {
-    if (!notice.title?.trim()) throw new Error('Notice title is required.');
-    if (!notice.content?.trim()) throw new Error('Notice content is required.');
+  ): Promise<Notice> {
+    const id = `not-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-    const newNotice: Notice = {
-      id: `not-${Date.now()}`,
-      title: notice.title.trim(),
-      content: notice.content.trim(),
-      targetClass: notice.targetClass || 'All',
-      priority: notice.priority || 'normal',
-      authorId: actor.id,
-      authorName: actor.name,
-      authorRole: actor.role,
-      createdAt: new Date().toISOString(),
-      readByStudentIds: [],
-    };
+    const queryText = `
+      INSERT INTO notices (
+        id, title, content, target_class, priority,
+        attachment_url, author_id, author_name, author_role,
+        read_by_student_ids, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5,
+        $6, $7, $8, $9,
+        '{}', NOW(), NOW()
+      ) RETURNING *;
+    `;
 
-    this.data.notices.unshift(newNotice);
+    const values = [
+      id,
+      noticeData.title.trim(),
+      noticeData.content.trim(),
+      noticeData.targetClass,
+      noticeData.priority,
+      noticeData.attachmentUrl || null,
+      actor.id,
+      actor.name,
+      actor.role,
+    ];
 
-    this.logAudit({
+    const res = await this.query(queryText, values);
+    const created = this.mapNoticeRow(res.rows[0]);
+
+    await this.logAudit({
       actorId: actor.id,
       actorName: actor.name,
       actorRole: actor.role,
-      action: 'NOTICE_BROADCAST',
+      action: 'NOTICE_PUBLISHED',
       entityType: 'notice',
-      entityId: newNotice.id,
-      details: `Published ${newNotice.priority.toUpperCase()} notice "${newNotice.title}" targeting ${newNotice.targetClass}.`,
+      entityId: created.id,
+      details: `Published notice "${created.title}" for class ${created.targetClass}.`,
     });
 
-    this.save();
-    return newNotice;
+    return created;
   }
 
-  public markNoticeRead(noticeId: string, studentId: string) {
-    const notice = this.data.notices.find((n) => n.id === noticeId);
-    if (notice && !notice.readByStudentIds.includes(studentId)) {
-      notice.readByStudentIds.push(studentId);
-      this.save();
-    }
-    return notice;
+  public async deleteNotice(id: string, actor: UserSession): Promise<boolean> {
+    const res = await this.query(`DELETE FROM notices WHERE id = $1 RETURNING title`, [id]);
+    if (res.rows.length === 0) return false;
+
+    await this.logAudit({
+      actorId: actor.id,
+      actorName: actor.name,
+      actorRole: actor.role,
+      action: 'NOTICE_DELETED',
+      entityType: 'notice',
+      entityId: id,
+      details: `Deleted notice "${res.rows[0].title}".`,
+    });
+
+    return true;
   }
 
-  // --- Doubts & Student Queries ---
+  // --- Doubts & Solutions ---
 
-  public getDoubts(studentId?: string, className?: string) {
-    let list = [...this.data.doubts];
-    if (studentId) {
-      list = list.filter((d) => d.studentId === studentId);
+  public async getDoubts(params?: {
+    studentId?: string;
+    className?: string;
+    status?: string;
+  }): Promise<Doubt[]> {
+    let queryText = `SELECT * FROM doubts WHERE 1=1`;
+    const values: any[] = [];
+    let pIdx = 1;
+
+    if (params?.studentId) {
+      queryText += ` AND student_id = $${pIdx++}`;
+      values.push(params.studentId);
     }
-    if (className && className !== 'All') {
-      list = list.filter((d) => d.className === className);
+    if (params?.className && params.className !== 'All') {
+      queryText += ` AND class_name = $${pIdx++}`;
+      values.push(params.className);
     }
-    return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    if (params?.status && params.status !== 'all') {
+      queryText += ` AND status = $${pIdx++}`;
+      values.push(params.status);
+    }
+
+    queryText += ` ORDER BY created_at DESC`;
+    const res = await this.query(queryText, values);
+    return res.rows.map(this.mapDoubtRow);
   }
 
-  public createDoubt(
-    doubt: { title: string; description: string; imageUrl?: string },
-    student: UserSession
-  ): Doubt {
-    if (!doubt.title?.trim()) throw new Error('Doubt title is required.');
-    if (!doubt.description?.trim()) throw new Error('Description is required.');
+  public async createDoubt(
+    doubtData: {
+      studentId: string;
+      studentRoll: number;
+      studentName: string;
+      className: string;
+      title: string;
+      description: string;
+      imageUrl?: string;
+    },
+    actor: UserSession
+  ): Promise<Doubt> {
+    const id = `dbt-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-    const studentRecord = this.data.students.find((s) => s.id === student.id || s.rollNumber === student.rollNumber);
-    const studentName = studentRecord?.fullName || student.name;
-    const studentRoll = studentRecord?.rollNumber || student.rollNumber || 1;
-    const className = studentRecord?.className || 'Class 10';
+    const queryText = `
+      INSERT INTO doubts (
+        id, student_id, student_roll, student_name, class_name,
+        title, description, image_url, status, replies, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5,
+        $6, $7, $8, 'pending', '[]', NOW(), NOW()
+      ) RETURNING *;
+    `;
 
-    const newDoubt: Doubt = {
-      id: `dbt-${Date.now()}`,
-      studentId: studentRecord?.id || student.id,
-      studentRoll,
-      studentName,
-      className,
-      title: doubt.title.trim(),
-      description: doubt.description.trim(),
-      imageUrl: doubt.imageUrl,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      replies: [],
-    };
+    const values = [
+      id,
+      doubtData.studentId,
+      doubtData.studentRoll,
+      doubtData.studentName,
+      doubtData.className,
+      doubtData.title.trim(),
+      doubtData.description.trim(),
+      doubtData.imageUrl || null,
+    ];
 
-    this.data.doubts.unshift(newDoubt);
+    const res = await this.query(queryText, values);
+    const created = this.mapDoubtRow(res.rows[0]);
 
-    this.logAudit({
-      actorId: student.id,
-      actorName: studentName,
-      actorRole: 'student',
-      action: 'DOUBT_SUBMITTED',
+    await this.logAudit({
+      actorId: actor.id,
+      actorName: actor.name,
+      actorRole: actor.role,
+      action: 'DOUBT_ASKED',
       entityType: 'doubt',
-      entityId: newDoubt.id,
-      details: `Student ${studentName} submitted doubt: "${newDoubt.title}" (${className}). Attachment: ${newDoubt.imageUrl ? 'Yes' : 'No'}`,
+      entityId: created.id,
+      details: `Student ${created.studentName} asked doubt "${created.title}".`,
     });
 
-    this.save();
-    return newDoubt;
+    return created;
   }
 
-  public replyToDoubt(
+  public async replyToDoubt(
     doubtId: string,
     message: string,
     imageUrl: string | undefined,
     actor: UserSession
-  ): Doubt {
-    const doubt = this.data.doubts.find((d) => d.id === doubtId);
-    if (!doubt) throw new Error(`Doubt with ID ${doubtId} not found.`);
-    if (!message?.trim()) throw new Error('Reply message cannot be empty.');
+  ): Promise<Doubt> {
+    const res = await this.query(`SELECT * FROM doubts WHERE id = $1 LIMIT 1`, [doubtId]);
+    if (res.rows.length === 0) throw new Error(`Doubt #${doubtId} not found.`);
 
-    const now = new Date().toISOString();
-    const reply: DoubtReply = {
+    const currentDoubt = this.mapDoubtRow(res.rows[0]);
+    const newReply: DoubtReply = {
       id: `rep-${Date.now()}`,
-      doubtId,
       authorId: actor.id,
       authorName: actor.name,
       authorRole: actor.role,
       message: message.trim(),
-      imageUrl,
-      createdAt: now,
+      imageUrl: imageUrl || undefined,
+      createdAt: new Date().toISOString(),
     };
 
-    doubt.replies.push(reply);
-    doubt.status = 'answered';
-    doubt.updatedAt = now;
+    const updatedReplies = [...currentDoubt.replies, newReply];
 
-    this.logAudit({
-      actorId: actor.id,
-      actorName: actor.name,
-      actorRole: actor.role,
-      action: 'DOUBT_REPLIED',
-      entityType: 'doubt',
-      entityId: doubtId,
-      details: `${actor.name} (${actor.role}) replied to doubt "${doubt.title}".`,
-    });
-
-    this.save();
-    return doubt;
-  }
-
-  public updateDoubtStatus(doubtId: string, status: DoubtStatus, actor: UserSession): Doubt {
-    const doubt = this.data.doubts.find((d) => d.id === doubtId);
-    if (!doubt) throw new Error(`Doubt with ID ${doubtId} not found.`);
-
-    doubt.status = status;
-    doubt.updatedAt = new Date().toISOString();
-
-    this.logAudit({
-      actorId: actor.id,
-      actorName: actor.name,
-      actorRole: actor.role,
-      action: 'DOUBT_STATUS_CHANGED',
-      entityType: 'doubt',
-      entityId: doubtId,
-      details: `Changed doubt status of "${doubt.title}" to ${status.toUpperCase()}.`,
-    });
-
-    this.save();
-    return doubt;
-  }
-
-  // --- Teachers Management (Developer/Superadmin) ---
-
-  public getTeachers(): Teacher[] {
-    return [...this.data.teachers];
-  }
-
-  public createTeacher(teacherData: Omit<Teacher, 'id' | 'joinedDate'>, actor: UserSession): Teacher {
-    if (!teacherData.name?.trim()) throw new Error('Teacher name is required.');
-    if (!teacherData.username?.trim()) throw new Error('Username is required.');
-    if (!teacherData.email?.trim()) throw new Error('Email is required.');
-
-    const existing = this.data.teachers.find(
-      (t) => t.username.toLowerCase() === teacherData.username.toLowerCase()
+    const updateRes = await this.query(
+      `UPDATE doubts SET
+         status = 'answered',
+         replies = $2,
+         updated_at = NOW()
+       WHERE id = $1
+       RETURNING *;`,
+      [doubtId, JSON.stringify(updatedReplies)]
     );
-    if (existing) {
-      throw new Error(`Teacher username "${teacherData.username}" already exists.`);
+
+    const updated = this.mapDoubtRow(updateRes.rows[0]);
+
+    await this.logAudit({
+      actorId: actor.id,
+      actorName: actor.name,
+      actorRole: actor.role,
+      action: 'DOUBT_ANSWERED',
+      entityType: 'doubt',
+      entityId: doubtId,
+      details: `${actor.name} replied to doubt "${updated.title}".`,
+    });
+
+    return updated;
+  }
+
+  // --- Faculty / Teachers ---
+
+  public async getTeachers(): Promise<Teacher[]> {
+    const res = await this.query(`SELECT * FROM teachers WHERE active = TRUE ORDER BY name ASC`);
+    return res.rows.map(this.mapTeacherRow);
+  }
+
+  public async createTeacher(
+    teacherData: {
+      name: string;
+      username: string;
+      password?: string;
+      email?: string;
+      mobile?: string;
+      phone?: string;
+      mobileNumber?: string;
+      subject?: string;
+      assignedClasses: string[];
+      photoUrl?: string;
+    },
+    actor: UserSession
+  ): Promise<Teacher> {
+    const cleanUser = teacherData.username.trim().toLowerCase();
+    const existing = await this.query(`SELECT id FROM teachers WHERE LOWER(username) = $1 LIMIT 1`, [cleanUser]);
+    if (existing.rows.length > 0) {
+      throw new Error(`Faculty username "@${cleanUser}" is already taken.`);
     }
 
-    const newTeacher: Teacher = {
-      ...teacherData,
-      id: `teach-${Date.now()}`,
-      joinedDate: new Date().toISOString().split('T')[0],
-      active: true,
-    };
+    const id = `teach-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const phone = teacherData.mobile || teacherData.phone || teacherData.mobileNumber || '';
 
-    this.data.teachers.push(newTeacher);
+    const queryText = `
+      INSERT INTO teachers (
+        id, username, name, password, email, mobile, phone, mobile_number,
+        subject, assigned_classes, subjects, active, photo_url, joined_date, created_at, updated_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, TRUE, $12, $13, NOW(), NOW()
+      ) RETURNING *;
+    `;
 
-    this.logAudit({
+    const values = [
+      id,
+      cleanUser,
+      teacherData.name.trim(),
+      teacherData.password?.trim() || 'teach123',
+      teacherData.email?.trim() || `${cleanUser}@manasthalitutions.com`,
+      phone,
+      phone,
+      phone,
+      teacherData.subject?.trim() || 'Mathematics & Physics',
+      teacherData.assignedClasses && teacherData.assignedClasses.length > 0 ? teacherData.assignedClasses : ['Class 10'],
+      [teacherData.subject?.trim() || 'Mathematics & Physics'],
+      teacherData.photoUrl || null,
+      new Date().toISOString().split('T')[0],
+    ];
+
+    const res = await this.query(queryText, values);
+    const created = this.mapTeacherRow(res.rows[0]);
+
+    await this.logAudit({
       actorId: actor.id,
       actorName: actor.name,
       actorRole: actor.role,
-      action: 'TEACHER_CREATED',
+      action: 'TEACHER_REGISTERED',
       entityType: 'teacher',
-      entityId: newTeacher.id,
-      details: `Added new faculty member: ${newTeacher.name} (${newTeacher.username}) with assigned classes: ${newTeacher.assignedClasses.join(', ')}`,
+      entityId: created.id,
+      details: `Registered faculty instructor ${created.name} (@${created.username}) for ${created.assignedClasses.join(', ')}.`,
     });
 
-    this.save();
-    return newTeacher;
+    return created;
   }
 
-  public updateTeacher(id: string, updates: Partial<Teacher>, actor: UserSession): Teacher {
-    const teacher = this.data.teachers.find((t) => t.id === id);
-    if (!teacher) throw new Error(`Teacher with ID ${id} not found.`);
+  public async updateTeacher(id: string, updates: Partial<Teacher>, actor: UserSession): Promise<Teacher> {
+    const existing = await this.query(`SELECT * FROM teachers WHERE id = $1 LIMIT 1`, [id]);
+    if (existing.rows.length === 0) throw new Error(`Teacher #${id} not found.`);
 
-    if (updates.name) teacher.name = updates.name.trim();
-    if (updates.email) teacher.email = updates.email.trim();
-    if (updates.mobile) teacher.mobile = updates.mobile.trim();
-    if (updates.subject) teacher.subject = updates.subject.trim();
-    if (updates.assignedClasses) teacher.assignedClasses = updates.assignedClasses;
-    if (updates.password) teacher.password = updates.password.trim();
-    if (typeof updates.active === 'boolean') teacher.active = updates.active;
-    if (updates.photoUrl !== undefined) teacher.photoUrl = updates.photoUrl;
+    const phone = updates.mobile || updates.phone || updates.mobileNumber;
 
-    this.logAudit({
+    const queryText = `
+      UPDATE teachers SET
+        name = COALESCE($2, name),
+        email = COALESCE($3, email),
+        mobile = COALESCE($4, mobile),
+        phone = COALESCE($4, phone),
+        mobile_number = COALESCE($4, mobile_number),
+        subject = COALESCE($5, subject),
+        assigned_classes = COALESCE($6, assigned_classes),
+        password = COALESCE($7, password),
+        photo_url = COALESCE($8, photo_url),
+        active = COALESCE($9, active),
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING *;
+    `;
+
+    const values = [
+      id,
+      updates.name ? updates.name.trim() : null,
+      updates.email !== undefined ? updates.email?.trim() || null : null,
+      phone !== undefined ? phone.trim() : null,
+      updates.subject !== undefined ? updates.subject.trim() : null,
+      updates.assignedClasses ?? null,
+      updates.password !== undefined ? updates.password.trim() : null,
+      updates.photoUrl !== undefined ? updates.photoUrl : null,
+      updates.active !== undefined ? updates.active : null,
+    ];
+
+    const res = await this.query(queryText, values);
+    const updated = this.mapTeacherRow(res.rows[0]);
+
+    await this.logAudit({
       actorId: actor.id,
       actorName: actor.name,
       actorRole: actor.role,
       action: 'TEACHER_UPDATED',
       entityType: 'teacher',
-      entityId: teacher.id,
-      details: `Updated faculty member details for ${teacher.name} (${teacher.username}).`,
+      entityId: id,
+      details: `Updated faculty details for ${updated.name} (@${updated.username}).`,
     });
 
-    this.save();
-    return teacher;
+    return updated;
   }
 
-  public deleteTeacher(id: string, actor: UserSession): boolean {
-    const idx = this.data.teachers.findIndex((t) => t.id === id);
-    if (idx === -1) throw new Error(`Teacher with ID ${id} not found.`);
+  public async deleteTeacher(id: string, actor: UserSession): Promise<boolean> {
+    const res = await this.query(`DELETE FROM teachers WHERE id = $1 RETURNING name, username`, [id]);
+    if (res.rows.length === 0) throw new Error(`Teacher #${id} not found.`);
 
-    const deleted = this.data.teachers.splice(idx, 1)[0];
-
-    this.logAudit({
+    await this.logAudit({
       actorId: actor.id,
       actorName: actor.name,
       actorRole: actor.role,
       action: 'TEACHER_DELETED',
       entityType: 'teacher',
       entityId: id,
-      details: `Removed faculty member ${deleted.name} (${deleted.username}).`,
+      details: `Removed faculty instructor ${res.rows[0].name} (@${res.rows[0].username}).`,
     });
 
-    this.save();
     return true;
   }
 
   // --- Audit Logs ---
 
-  public logAudit(entry: Omit<AuditLog, 'id' | 'timestamp'>) {
-    const log: AuditLog = {
-      ...entry,
-      id: `aud-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      timestamp: new Date().toISOString(),
-    };
-    this.data.auditLogs.unshift(log);
-    // Keep max 500 audit logs to prevent infinite expansion
-    if (this.data.auditLogs.length > 500) {
-      this.data.auditLogs.pop();
+  public async logAudit(entry: Omit<AuditLog, 'id' | 'timestamp'>) {
+    try {
+      const id = `aud-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+      await this.query(
+        `INSERT INTO audit_logs (id, timestamp, actor_id, actor_name, actor_role, action, entity_type, entity_id, details)
+         VALUES ($1, NOW(), $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          id,
+          entry.actorId,
+          entry.actorName,
+          entry.actorRole,
+          entry.action,
+          entry.entityType,
+          entry.entityId || null,
+          entry.details,
+        ]
+      );
+    } catch (e) {
+      console.error('Failed to write audit log to PostgreSQL:', e);
     }
-    this.save();
-    return log;
   }
 
-  public getAuditLogs(params?: { entityType?: string; actorRole?: string; limit?: number }) {
-    let logs = [...this.data.auditLogs];
+  public async getAuditLogs(params?: {
+    entityType?: string;
+    actorRole?: string;
+    limit?: number;
+  }): Promise<AuditLog[]> {
+    let queryText = `SELECT * FROM audit_logs WHERE 1=1`;
+    const values: any[] = [];
+    let pIdx = 1;
+
     if (params?.entityType && params.entityType !== 'all') {
-      logs = logs.filter((l) => l.entityType === params.entityType);
+      queryText += ` AND entity_type = $${pIdx++}`;
+      values.push(params.entityType);
     }
     if (params?.actorRole && params.actorRole !== 'all') {
-      logs = logs.filter((l) => l.actorRole === params.actorRole);
+      queryText += ` AND actor_role = $${pIdx++}`;
+      values.push(params.actorRole);
     }
+
     const limit = params?.limit || 100;
-    return logs.slice(0, limit);
+    queryText += ` ORDER BY timestamp DESC LIMIT $${pIdx}`;
+    values.push(limit);
+
+    const res = await this.query(queryText, values);
+    return res.rows.map((r) => ({
+      id: r.id,
+      timestamp: r.timestamp instanceof Date ? r.timestamp.toISOString() : String(r.timestamp),
+      actorId: r.actor_id,
+      actorName: r.actor_name,
+      actorRole: r.actor_role,
+      action: r.action,
+      entityType: r.entity_type,
+      entityId: r.entity_id,
+      details: r.details,
+    }));
   }
 
-  // --- Developer System Stats & Reseeding ---
+  // --- Row Mappers ---
 
-  public getSystemStats() {
+  private mapStudentRow(r: any): Student {
     return {
-      studentsCount: this.data.students.length,
-      teachersCount: this.data.teachers.length,
-      attendanceRecordsCount: this.data.attendance.length,
-      feeRecordsCount: this.data.feeRecords.length,
-      noticesCount: this.data.notices.length,
-      doubtsCount: this.data.doubts.length,
-      pendingDoubtsCount: this.data.doubts.filter((d) => d.status === 'pending').length,
-      auditLogsCount: this.data.auditLogs.length,
-      lastUpdated: new Date().toISOString(),
+      id: r.id,
+      rollNumber: Number(r.roll_number),
+      fullName: r.full_name,
+      mobileNumber: r.mobile_number,
+      email: r.email || undefined,
+      photoUrl: r.photo_url || undefined,
+      address: r.address,
+      className: r.class_name,
+      dob: r.dob,
+      dateOfJoining: r.date_of_joining,
+      feePaidStatus: r.fee_paid_status,
+      feeDueAmount: Number(r.fee_due_amount || 0),
+      feePaidAmount: Number(r.fee_paid_amount || 0),
+      feeLastPaidDate: r.fee_last_paid_date || undefined,
+      paymentMode: r.payment_mode || undefined,
+      notes: r.notes || undefined,
+      active: Boolean(r.active),
+      createdByTeacherId: r.created_by_teacher_id || undefined,
+      createdByName: r.created_by_name || undefined,
+      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+      updatedAt: r.updated_at instanceof Date ? r.updated_at.toISOString() : String(r.updated_at),
     };
   }
 
-  public resetToSeed(actor: UserSession) {
-    this.seedInitialData();
-    this.logAudit({
-      actorId: actor.id,
-      actorName: actor.name,
-      actorRole: actor.role,
-      action: 'SYSTEM_DATABASE_RESET',
-      entityType: 'system',
-      details: 'Restored database to initial pristine seed state.',
-    });
-    this.save();
+  private mapAttendanceRow(r: any): AttendanceRecord {
+    return {
+      id: r.id,
+      studentId: r.student_id,
+      studentRoll: Number(r.student_roll),
+      studentName: r.student_name,
+      className: r.class_name,
+      date: r.date,
+      status: r.status,
+      markedBy: r.marked_by,
+      markedByName: r.marked_by_name,
+      remarks: r.remarks || undefined,
+      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+      updatedAt: r.updated_at instanceof Date ? r.updated_at.toISOString() : String(r.updated_at),
+    };
+  }
+
+  private mapFeeRow(r: any): FeeRecord {
+    return {
+      id: r.id,
+      studentId: r.student_id,
+      studentRoll: Number(r.student_roll),
+      studentName: r.student_name,
+      className: r.class_name,
+      amount: Number(r.amount || 0),
+      dueAmount: Number(r.due_amount || 0),
+      status: r.status,
+      paymentMode: r.payment_mode,
+      receiptNumber: r.receipt_number,
+      transactionDate: r.transaction_date,
+      markedBy: r.marked_by,
+      markedByName: r.marked_by_name,
+      remarks: r.remarks || undefined,
+      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+      updatedAt: r.updated_at instanceof Date ? r.updated_at.toISOString() : String(r.updated_at),
+    };
+  }
+
+  private mapNoticeRow(r: any): Notice {
+    return {
+      id: r.id,
+      title: r.title,
+      content: r.content,
+      targetClass: r.target_class,
+      priority: r.priority,
+      attachmentUrl: r.attachment_url || undefined,
+      authorId: r.author_id,
+      authorName: r.author_name,
+      authorRole: r.author_role,
+      readByStudentIds: Array.isArray(r.read_by_student_ids) ? r.read_by_student_ids : [],
+      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+      updatedAt: r.updated_at instanceof Date ? r.updated_at.toISOString() : String(r.updated_at),
+    };
+  }
+
+  private mapDoubtRow(r: any): Doubt {
+    let parsedReplies: DoubtReply[] = [];
+    try {
+      parsedReplies = typeof r.replies === 'string' ? JSON.parse(r.replies) : r.replies || [];
+    } catch (e) {
+      parsedReplies = [];
+    }
+
+    return {
+      id: r.id,
+      studentId: r.student_id,
+      studentRoll: Number(r.student_roll),
+      studentName: r.student_name,
+      className: r.class_name,
+      title: r.title,
+      description: r.description,
+      imageUrl: r.image_url || undefined,
+      status: r.status,
+      replies: parsedReplies,
+      createdAt: r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at),
+      updatedAt: r.updated_at instanceof Date ? r.updated_at.toISOString() : String(r.updated_at),
+    };
+  }
+
+  private mapTeacherRow(r: any): Teacher {
+    return {
+      id: r.id,
+      username: r.username,
+      name: r.name,
+      password: r.password || undefined,
+      email: r.email || undefined,
+      mobile: r.mobile || r.phone || r.mobile_number || undefined,
+      phone: r.phone || r.mobile || undefined,
+      mobileNumber: r.mobile_number || r.mobile || undefined,
+      subject: r.subject || undefined,
+      assignedClasses: Array.isArray(r.assigned_classes) ? r.assigned_classes : ['Class 10'],
+      subjects: Array.isArray(r.subjects) ? r.subjects : [],
+      active: Boolean(r.active),
+      photoUrl: r.photo_url || undefined,
+      joinedDate: r.joined_date || undefined,
+    };
   }
 }
 
-export const db = new DatabaseService();
+export const db = new PostgresDatabaseService();

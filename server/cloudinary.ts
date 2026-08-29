@@ -1,21 +1,19 @@
-import crypto from 'crypto';
+import { v2 as cloudinary } from 'cloudinary';
 
-export interface CloudinarySignatureResponse {
-  signature: string;
-  timestamp: number;
-  cloudName: string;
-  apiKey: string;
-  uploadPreset?: string;
-  folder: string;
+export interface CloudinaryUploadResult {
+  url: string;
+  publicId: string;
+  bytes?: number;
+  format?: string;
 }
 
 export function getCloudinaryConfig() {
-  let cloudName = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_CLOUD_NAME || '';
-  let apiKey = process.env.NEXT_PUBLIC_CLOUDINARY_API_KEY || process.env.CLOUDINARY_API_KEY || '';
+  let cloudName = process.env.CLOUDINARY_CLOUD_NAME || process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || '';
+  let apiKey = process.env.CLOUDINARY_API_KEY || process.env.NEXT_PUBLIC_CLOUDINARY_API_KEY || '';
   let apiSecret = process.env.CLOUDINARY_API_SECRET || '';
-  const uploadPreset = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || process.env.CLOUDINARY_UPLOAD_PRESET || '';
+  const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET || process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || '';
 
-  // Parse CLOUDINARY_URL if provided (e.g., cloudinary://123456789:abcdefgh@mycloud)
+  // Parse CLOUDINARY_URL if provided
   const cloudinaryUrl = process.env.CLOUDINARY_URL;
   if (cloudinaryUrl && cloudinaryUrl.startsWith('cloudinary://')) {
     try {
@@ -28,11 +26,16 @@ export function getCloudinaryConfig() {
     }
   }
 
-  if (!cloudName) {
-    cloudName = 'demo';
-  }
+  const isConfigured = Boolean(cloudName && apiKey && apiSecret && cloudName !== 'demo');
 
-  const isConfigured = Boolean(cloudName && cloudName !== 'demo' && apiKey && apiSecret);
+  if (isConfigured) {
+    cloudinary.config({
+      cloud_name: cloudName,
+      api_key: apiKey,
+      api_secret: apiSecret,
+      secure: true,
+    });
+  }
 
   return {
     cloudName,
@@ -44,75 +47,36 @@ export function getCloudinaryConfig() {
 }
 
 /**
- * Generate a signed upload token for direct client-to-Cloudinary upload
+ * Upload an image (base64 string or data uri) directly to Cloudinary.
+ * Throws explicit error if Cloudinary environment variables are missing.
  */
-export function generateSignedUploadParams(folder: string = 'tuition_students'): CloudinarySignatureResponse | null {
+export async function uploadToCloudinary(
+  fileBase64OrUrl: string,
+  folder: string = 'manasthali_tuition'
+): Promise<CloudinaryUploadResult> {
   const config = getCloudinaryConfig();
+
   if (!config.isConfigured) {
-    return null;
+    throw new Error(
+      'Cloudinary environment variables missing: Please configure CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET in settings.'
+    );
   }
 
-  const timestamp = Math.round(new Date().getTime() / 1000);
-  const paramsToSign = `folder=${folder}&timestamp=${timestamp}${config.apiSecret}`;
-  const signature = crypto.createHash('sha256').update(paramsToSign).digest('hex');
+  try {
+    const uploadResponse = await cloudinary.uploader.upload(fileBase64OrUrl, {
+      folder,
+      resource_type: 'auto',
+      transformation: [{ quality: 'auto:good' }, { fetch_format: 'auto' }],
+    });
 
-  return {
-    signature,
-    timestamp,
-    cloudName: config.cloudName,
-    apiKey: config.apiKey,
-    uploadPreset: config.uploadPreset,
-    folder,
-  };
-}
-
-/**
- * Upload image to Cloudinary via server or return optimized Base64 data URL
- */
-export async function uploadImage(
-  base64OrBuffer: string,
-  folder: string = 'tuition_students'
-): Promise<{ url: string; publicId?: string; provider: 'cloudinary' | 'local_fallback' }> {
-  const config = getCloudinaryConfig();
-
-  if (config.isConfigured) {
-    try {
-      const timestamp = Math.round(new Date().getTime() / 1000);
-      const strToSign = `folder=${folder}&timestamp=${timestamp}${config.apiSecret}`;
-      const signature = crypto.createHash('sha1').update(strToSign).digest('hex');
-
-      const formData = new URLSearchParams();
-      formData.append('file', base64OrBuffer);
-      formData.append('api_key', config.apiKey);
-      formData.append('timestamp', timestamp.toString());
-      formData.append('signature', signature);
-      formData.append('folder', folder);
-
-      const endpoint = `https://api.cloudinary.com/v1_1/${config.cloudName}/image/upload`;
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        return {
-          url: data.secure_url || data.url,
-          publicId: data.public_id,
-          provider: 'cloudinary',
-        };
-      } else {
-        const errorText = await response.text();
-        console.warn('Cloudinary upload returned non-200, falling back to local storage:', errorText);
-      }
-    } catch (err) {
-      console.warn('Cloudinary upload network error, using local fallback:', err);
-    }
+    return {
+      url: uploadResponse.secure_url || uploadResponse.url,
+      publicId: uploadResponse.public_id,
+      bytes: uploadResponse.bytes,
+      format: uploadResponse.format,
+    };
+  } catch (error: any) {
+    console.error('Cloudinary upload error:', error);
+    throw new Error(`Cloudinary upload failed: ${error.message || error}`);
   }
-
-  // Graceful fallback: return the clean data URI so student photos and doubt images display immediately
-  return {
-    url: base64OrBuffer,
-    provider: 'local_fallback',
-  };
 }
